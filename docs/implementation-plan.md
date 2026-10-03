@@ -19,7 +19,7 @@ Do not start coding against the original attached drafts. Those drafts are super
 | 7 | Network | **Xahau mainnet** (`wss://xahau.network`). Testnet is an override, not the default. |
 | 8 | Blackholed | Master key disabled **and** RegularKey absent or a known blackhole address. |
 | 9 | Auth | **No API key.** Bind `0.0.0.0:3000`, open CORS. Operators reverse-proxy if they want TLS or ACLs. |
-| 10 | This PR | Plan and contracts only. Implementation is the next branch. |
+| 10 | Delivery | Plan first, then Phase 0–1 skeleton on `cursor/v1-skeleton-5c2e`. |
 
 ### Still out of v1
 
