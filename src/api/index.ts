@@ -5,7 +5,11 @@ import Fastify, { type FastifyError, type FastifyInstance } from 'fastify';
 import type { LogLevel } from '../config.js';
 import type { AppContext } from './context.js';
 import { ApiError } from './errors.js';
+import { hookRoutes } from './routes/hooks.js';
+import { issuerRoutes } from './routes/issuers.js';
 import { statusRoutes } from './routes/status.js';
+import { tokenRoutes } from './routes/tokens.js';
+import { uriTokenRoutes } from './routes/uritokens.js';
 
 export type AppInstance = FastifyInstance<
   import('http').Server,
@@ -25,11 +29,14 @@ export async function buildApi(
 
   app.decorate('db', context.db);
   app.decorate('config', context.config);
-  app.decorate('startedAt', context.startedAt);
-  app.decorate('networkLedgerIndex', context.networkLedgerIndex);
+  app.decorate('runtime', context.runtime);
 
   await app.register(cors, { origin: true });
   await app.register(statusRoutes);
+  await app.register(tokenRoutes);
+  await app.register(uriTokenRoutes);
+  await app.register(issuerRoutes);
+  await app.register(hookRoutes);
 
   app.setNotFoundHandler((request, reply) => {
     reply.status(404).send({

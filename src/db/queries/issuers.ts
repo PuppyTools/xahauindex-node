@@ -1,6 +1,46 @@
 import type { IssuerRow } from '../../types/db.js';
 import type { SqliteDatabase } from '../client.js';
 
+export function ensureIssuer(db: SqliteDatabase, account: string, ledger: number): void {
+  db.prepare(
+    `
+    INSERT INTO issuers (
+      account, domain_verified, blackholed, has_hooks, first_ledger, last_updated
+    ) VALUES (?, 0, 0, 0, ?, ?)
+    ON CONFLICT(account) DO NOTHING
+    `,
+  ).run(account, ledger, ledger);
+}
+
+export function updateIssuerOnChain(
+  db: SqliteDatabase,
+  row: Pick<
+    IssuerRow,
+    | 'account'
+    | 'domain'
+    | 'email_hash'
+    | 'transfer_rate'
+    | 'flags'
+    | 'blackholed'
+    | 'has_hooks'
+    | 'last_updated'
+  >,
+): void {
+  db.prepare(
+    `
+    UPDATE issuers SET
+      domain = @domain,
+      email_hash = @email_hash,
+      transfer_rate = @transfer_rate,
+      flags = @flags,
+      blackholed = @blackholed,
+      has_hooks = @has_hooks,
+      last_updated = @last_updated
+    WHERE account = @account
+    `,
+  ).run(row);
+}
+
 export function getIssuer(db: SqliteDatabase, account: string): IssuerRow | undefined {
   return db.prepare('SELECT * FROM issuers WHERE account = ?').get(account) as IssuerRow | undefined;
 }

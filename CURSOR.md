@@ -137,7 +137,7 @@ Copy `.env.example` to `.env`. Never commit `.env`.
 ```bash
 cp .env.example .env
 npm install
-npm run dev
+npm run dev       # tsx watch src/index.ts
 npm run build
 npm test
 ```

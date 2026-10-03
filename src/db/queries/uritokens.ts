@@ -1,6 +1,32 @@
 import type { UriTokenRow, UriTokenTransferRow } from '../../types/db.js';
 import type { SqliteDatabase } from '../client.js';
 
+export function countUriTokens(
+  db: SqliteDatabase,
+  opts: { issuer?: string; owner?: string; burned?: 0 | 1; forSale?: boolean },
+): number {
+  const where: string[] = [];
+  const params: Record<string, string | number> = {};
+  if (opts.issuer !== undefined) {
+    where.push('issuer = @issuer');
+    params.issuer = opts.issuer;
+  }
+  if (opts.owner !== undefined) {
+    where.push('owner = @owner');
+    params.owner = opts.owner;
+  }
+  if (opts.burned !== undefined) {
+    where.push('burned = @burned');
+    params.burned = opts.burned;
+  }
+  if (opts.forSale === true) {
+    where.push('sell_offer IS NOT NULL');
+  }
+  const clause = where.length > 0 ? `WHERE ${where.join(' AND ')}` : '';
+  const row = db.prepare(`SELECT COUNT(*) AS n FROM uri_tokens ${clause}`).get(params) as { n: number };
+  return row.n;
+}
+
 export function getUriToken(db: SqliteDatabase, id: string): UriTokenRow | undefined {
   return db.prepare('SELECT * FROM uri_tokens WHERE id = ?').get(id) as UriTokenRow | undefined;
 }

@@ -1,8 +1,96 @@
 import type { TokenListFilter, TokenRow, TrustLineRow } from '../../types/db.js';
 import type { SqliteDatabase } from '../client.js';
 
+import { addDecimal, isZeroDecimal } from '../../util/xahau.js';
+
 export function tokenId(currency: string, issuer: string): string {
   return `${currency}:${issuer}`;
+}
+
+export function ensureToken(
+  db: SqliteDatabase,
+  row: Pick<TokenRow, 'id' | 'currency' | 'currency_hex' | 'issuer' | 'first_ledger' | 'last_updated'>,
+): void {
+  db.prepare(
+    `
+    INSERT INTO tokens (
+      id, currency, currency_hex, issuer, holder_count, trust_count,
+      domain_verified, blackholed, first_ledger, last_updated
+    ) VALUES (
+      @id, @currency, @currency_hex, @issuer, 0, 0, 0, 0, @first_ledger, @last_updated
+    )
+    ON CONFLICT(id) DO NOTHING
+    `,
+  ).run(row);
+}
+
+export function updateTokenDisplay(
+  db: SqliteDatabase,
+  id: string,
+  fields: { name?: string; description?: string; icon_url?: string; website_url?: string },
+): void {
+  const current = getToken(db, id);
+  if (!current) {
+    return;
+  }
+  db.prepare(
+    `
+    UPDATE tokens SET
+      name = @name,
+      description = @description,
+      icon_url = @icon_url,
+      website_url = @website_url
+    WHERE id = @id
+    `,
+  ).run({
+    id,
+    name: fields.name ?? current.name,
+    description: fields.description ?? current.description,
+    icon_url: fields.icon_url ?? current.icon_url,
+    website_url: fields.website_url ?? current.website_url,
+  });
+}
+
+export function syncTokenIssuerFlags(db: SqliteDatabase): void {
+  db.exec(`
+    UPDATE tokens SET
+      domain_verified = COALESCE((SELECT domain_verified FROM issuers WHERE issuers.account = tokens.issuer), 0),
+      blackholed = COALESCE((SELECT blackholed FROM issuers WHERE issuers.account = tokens.issuer), 0)
+  `);
+}
+
+export function recomputeTokenAggregates(db: SqliteDatabase): void {
+  const lines = db
+    .prepare('SELECT currency, issuer, account, balance FROM trust_lines')
+    .all() as Array<{ currency: string; issuer: string; account: string; balance: string }>;
+  const aggregates = new Map<string, { holders: number; trusts: number; supply: string }>();
+  for (const line of lines) {
+    const id = tokenId(line.currency, line.issuer);
+    const current = aggregates.get(id) ?? { holders: 0, trusts: 0, supply: '0' };
+    current.trusts += 1;
+    if (line.account !== line.issuer && !isZeroDecimal(line.balance)) {
+      current.holders += 1;
+      current.supply = addDecimal(current.supply, line.balance);
+    }
+    aggregates.set(id, current);
+  }
+  const update = db.prepare(
+    `
+    UPDATE tokens SET
+      holder_count = @holder_count,
+      trust_count = @trust_count,
+      supply = @supply
+    WHERE id = @id
+    `,
+  );
+  for (const [id, agg] of aggregates) {
+    update.run({
+      id,
+      holder_count: agg.holders,
+      trust_count: agg.trusts,
+      supply: agg.supply,
+    });
+  }
 }
 
 export function getToken(db: SqliteDatabase, id: string): TokenRow | undefined {

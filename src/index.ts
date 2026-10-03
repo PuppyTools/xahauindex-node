@@ -1,21 +1,22 @@
 import { buildApi } from './api/index.js';
 import { initEnv, loadConfig } from './config.js';
 import { closeDatabase, openDatabase } from './db/client.js';
+import { startIngester } from './ingester/index.js';
 import { createLogger } from './logger.js';
+import { createRuntime } from './runtime.js';
 
 initEnv();
 
 const config = loadConfig();
 const log = createLogger(config.logLevel);
 const db = openDatabase(config.dbPath);
-const startedAt = Date.now();
+const runtime = createRuntime();
 
 const app = await buildApi(
   {
     db,
     config,
-    startedAt,
-    networkLedgerIndex: null,
+    runtime,
   },
   config.logLevel,
 );
@@ -39,3 +40,7 @@ log.info(
   { host: config.apiHost, port: config.apiPort, dbPath: config.dbPath },
   'xahauindex listening',
 );
+
+void startIngester({ db, config, runtime, log }).catch((error: unknown) => {
+  log.error({ err: error }, 'ingester failed');
+});

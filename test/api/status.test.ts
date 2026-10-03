@@ -7,7 +7,7 @@ import { setIndexerState } from '../../src/db/queries/indexer.js';
 import { upsertIssuer } from '../../src/db/queries/issuers.js';
 import { upsertToken } from '../../src/db/queries/tokens.js';
 import type { Status } from '../../src/types/api.js';
-import { sampleIssuer, sampleToken, testConfig } from '../helpers.js';
+import { sampleIssuer, sampleToken, testConfig, testRuntime } from '../helpers.js';
 
 const dbs: SqliteDatabase[] = [];
 
@@ -24,8 +24,7 @@ describe('GET /v1/status', () => {
     const app = await buildApi({
       db,
       config: testConfig(),
-      startedAt: Date.now() - 2_000,
-      networkLedgerIndex: null,
+      runtime: testRuntime({ startedAt: Date.now() - 2_000 }),
     });
 
     const response = await app.inject({ method: 'GET', url: '/v1/status' });
@@ -57,8 +56,7 @@ describe('GET /v1/status', () => {
     const app = await buildApi({
       db,
       config: testConfig(),
-      startedAt: Date.now(),
-      networkLedgerIndex: 102,
+      runtime: testRuntime({ networkLedgerIndex: 102 }),
     });
 
     const response = await app.inject({ method: 'GET', url: '/v1/status' });
@@ -81,8 +79,7 @@ describe('GET /v1/status', () => {
     const app = await buildApi({
       db,
       config: testConfig(),
-      startedAt: Date.now(),
-      networkLedgerIndex: null,
+      runtime: testRuntime(),
     });
     const response = await app.inject({ method: 'GET', url: '/v1/nope' });
     assert.equal(response.statusCode, 404);

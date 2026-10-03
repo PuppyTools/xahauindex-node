@@ -1,5 +1,21 @@
 import type { SqliteDatabase } from '../client.js';
 
+import type { LedgerRow } from '../../types/db.js';
+
+export function upsertLedger(db: SqliteDatabase, row: LedgerRow): void {
+  db.prepare(
+    `
+    INSERT INTO ledgers (ledger_index, close_time, hash, tx_count, indexed_at)
+    VALUES (@ledger_index, @close_time, @hash, @tx_count, @indexed_at)
+    ON CONFLICT(ledger_index) DO UPDATE SET
+      close_time = excluded.close_time,
+      hash = excluded.hash,
+      tx_count = excluded.tx_count,
+      indexed_at = excluded.indexed_at
+    `,
+  ).run(row);
+}
+
 export function getIndexerState(db: SqliteDatabase, key: string): string | undefined {
   const row = db.prepare('SELECT value FROM indexer_state WHERE key = ?').get(key) as
     | { value: string }

@@ -14,7 +14,7 @@ export const statusRoutes: FastifyPluginAsync = async (app) => {
       },
     },
     async () => {
-      const data = readStatus(app.db, app.startedAt, app.networkLedgerIndex);
+      const data = readStatus(app.db, app.runtime.startedAt, app.runtime.networkLedgerIndex);
       return {
         data,
         meta: {

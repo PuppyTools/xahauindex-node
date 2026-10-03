@@ -1,4 +1,5 @@
 import type { Config } from '../src/config.js';
+import type { Runtime } from '../src/runtime.js';
 import type { IssuerRow, TokenRow } from '../src/types/db.js';
 
 export function testConfig(overrides: Partial<Config> = {}): Config {
@@ -11,6 +12,21 @@ export function testConfig(overrides: Partial<Config> = {}): Config {
     ...overrides,
   };
 }
+
+export function testRuntime(overrides: Partial<Runtime> = {}): Runtime {
+  return {
+    startedAt: Date.now(),
+    networkLedgerIndex: null,
+    ...overrides,
+  };
+}
+
+export const silentLog = {
+  debug: () => undefined,
+  info: () => undefined,
+  warn: () => undefined,
+  error: () => undefined,
+};
 
 export function sampleIssuer(account = 'rHb9CJAWyB4rj91VRWn96DkukG4bwdtyTh'): IssuerRow {
   return {
