@@ -2,6 +2,7 @@ import type { SqliteDatabase } from '../db/client.js';
 import { getIndexerState, hasLedger, upsertLedger } from '../db/queries/indexer.js';
 import { recomputeTokenAggregates } from '../db/queries/tokens.js';
 import { serializeAmount } from '../util/xahau.js';
+import { applyExecutedOffers } from './dex.js';
 import { parseAffectedNode, parseLedgerTx } from './guards.js';
 import {
   applyAffectedLedgerNode,
@@ -70,11 +71,13 @@ export function applyClosedLedger(
               txHash: tx.hash,
               price: serializeAmount(tx.amount),
             };
+      const nodes = [];
       for (const rawNode of tx.affectedNodes) {
         const node = parseAffectedNode(rawNode);
         if (!node) {
           continue;
         }
+        nodes.push(node);
         const token = applyAffectedLedgerNode(
           db,
           node,
@@ -89,6 +92,7 @@ export function applyClosedLedger(
       if (tx.transactionType === 'SetRemarks' && tx.objectId && tx.remarks !== undefined) {
         applySetRemarks(db, tx.objectId, tx.remarks, ledger.index);
       }
+      applyExecutedOffers(db, tx, nodes, ledger.index, ledger.closeTime, log);
     }
     recomputeTokenAggregates(db, touched, ledger.index);
     upsertLedger(db, {

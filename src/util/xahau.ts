@@ -143,6 +143,30 @@ function formatDecimal(negative: boolean, digits: bigint, scale: number): string
   return negative ? `-${body}` : body;
 }
 
+export function subtractDecimal(a: string, b: string): string {
+  return addDecimal(a, negateDecimal(b));
+}
+
+export const DROPS_PER_XAH = 1_000_000n;
+
+export function dropsToXah(drops: string): string {
+  const trimmed = drops.trim();
+  const negative = trimmed.startsWith('-');
+  const unsigned = negative ? trimmed.slice(1) : trimmed;
+  if (!/^\d+$/.test(unsigned)) {
+    return drops;
+  }
+  const value = BigInt(unsigned);
+  const whole = value / DROPS_PER_XAH;
+  const frac = value % DROPS_PER_XAH;
+  if (frac === 0n) {
+    return negative ? `-${whole.toString()}` : whole.toString();
+  }
+  const fracText = frac.toString().padStart(6, '0').replace(/0+$/, '');
+  const body = `${whole.toString()}.${fracText}`;
+  return negative ? `-${body}` : body;
+}
+
 export function addDecimal(a: string, b: string): string {
   const left = parseDecimal(a);
   const right = parseDecimal(b);

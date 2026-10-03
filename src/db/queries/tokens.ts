@@ -51,12 +51,23 @@ export function updateTokenDisplay(
   });
 }
 
-export function syncTokenIssuerFlags(db: SqliteDatabase): void {
-  db.exec(`
+export function syncTokenIssuerFlags(db: SqliteDatabase, issuer?: string): void {
+  if (issuer === undefined) {
+    db.exec(`
+      UPDATE tokens SET
+        domain_verified = COALESCE((SELECT domain_verified FROM issuers WHERE issuers.account = tokens.issuer), 0),
+        blackholed = COALESCE((SELECT blackholed FROM issuers WHERE issuers.account = tokens.issuer), 0)
+    `);
+    return;
+  }
+  db.prepare(
+    `
     UPDATE tokens SET
       domain_verified = COALESCE((SELECT domain_verified FROM issuers WHERE issuers.account = tokens.issuer), 0),
       blackholed = COALESCE((SELECT blackholed FROM issuers WHERE issuers.account = tokens.issuer), 0)
-  `);
+    WHERE issuer = ?
+    `,
+  ).run(issuer);
 }
 
 export function splitTokenId(id: string): { currency: string; issuer: string } {

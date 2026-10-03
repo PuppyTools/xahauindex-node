@@ -1,10 +1,11 @@
 import type { SqliteDatabase } from '../db/client.js';
 import { getHookAccount, upsertHookAccount } from '../db/queries/hooks.js';
-import { ensureIssuer, getIssuer, updateIssuerOnChain } from '../db/queries/issuers.js';
+import { ensureIssuer, getIssuer, invalidateIssuerToml, updateIssuerOnChain } from '../db/queries/issuers.js';
 import { deleteRemark, listRemarksByObject, upsertRemark } from '../db/queries/remarks.js';
 import {
   deleteTrustLine,
   ensureToken,
+  syncTokenIssuerFlags,
   tokenId,
   updateTokenDisplay,
   upsertTrustLine,
@@ -353,6 +354,10 @@ export function applyAccountRoot(
         ? 1
         : 0;
   const knownIssuer = existingIssuer !== undefined;
+  const previousDomain = existingIssuer?.domain ?? null;
+  const previousBlackholed = existingIssuer?.blackholed ?? 0;
+  const domainChanged = domain !== previousDomain;
+  const blackholeChanged = blackholed !== previousBlackholed;
 
   if (domain || hasHooks || knownIssuer) {
     ensureIssuer(db, object.Account, ledger);
@@ -366,6 +371,12 @@ export function applyAccountRoot(
       has_hooks: hasHooks ? 1 : 0,
       last_updated: ledger,
     });
+    if (domainChanged) {
+      invalidateIssuerToml(db, object.Account);
+    }
+    if (domainChanged || blackholeChanged) {
+      syncTokenIssuerFlags(db, object.Account);
+    }
   }
 
   if (hookFieldsPresent) {

@@ -4,6 +4,7 @@ import type { Runtime } from '../runtime.js';
 import { followLive, type LiveLogger } from './live.js';
 import { runSnapshot } from './snapshot.js';
 import { createXahauSource } from './source.js';
+import { runTomlWorker } from './toml.js';
 
 export async function startIngester(options: {
   db: SqliteDatabase;
@@ -31,13 +32,19 @@ export async function startIngester(options: {
     if (options.signal?.aborted) {
       return;
     }
-    await followLive({
+    const live = followLive({
       db: options.db,
       source,
       runtime: options.runtime,
       log: options.log,
       ...(options.signal === undefined ? {} : { signal: options.signal }),
     });
+    const toml = runTomlWorker({
+      db: options.db,
+      log: options.log,
+      ...(options.signal === undefined ? {} : { signal: options.signal }),
+    });
+    await Promise.all([live, toml]);
   } finally {
     await source.disconnect();
   }

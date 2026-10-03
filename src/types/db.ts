@@ -57,6 +57,7 @@ export interface IssuerRow {
   toml_description: string | null;
   toml_icon_url: string | null;
   toml_raw: string | null;
+  toml_checked_ledger: number | null;
   has_hooks: SqliteBool;
   first_ledger: number;
   last_updated: number;

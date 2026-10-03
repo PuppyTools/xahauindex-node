@@ -41,6 +41,7 @@ export function sampleIssuer(account = 'rHb9CJAWyB4rj91VRWn96DkukG4bwdtyTh'): Is
     toml_description: null,
     toml_icon_url: null,
     toml_raw: null,
+    toml_checked_ledger: null,
     has_hooks: 0,
     first_ledger: 1,
     last_updated: 1,

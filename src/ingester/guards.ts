@@ -201,7 +201,16 @@ export function parseAffectedNode(value: unknown): ParsedAffectedNode | undefine
       return undefined;
     }
     const fields = isRecord(value.DeletedNode.FinalFields) ? value.DeletedNode.FinalFields : {};
-    return { kind: 'deleted', type, index, fields };
+    const previous = isRecord(value.DeletedNode.PreviousFields)
+      ? value.DeletedNode.PreviousFields
+      : undefined;
+    return {
+      kind: 'deleted',
+      type,
+      index,
+      fields,
+      ...(previous === undefined ? {} : { previous }),
+    };
   }
   return undefined;
 }

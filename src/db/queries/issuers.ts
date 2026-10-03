@@ -51,11 +51,11 @@ export function upsertIssuer(db: SqliteDatabase, row: IssuerRow): void {
     INSERT INTO issuers (
       account, domain, domain_verified, email_hash, transfer_rate, flags,
       blackholed, toml_name, toml_description, toml_icon_url, toml_raw,
-      has_hooks, first_ledger, last_updated
+      toml_checked_ledger, has_hooks, first_ledger, last_updated
     ) VALUES (
       @account, @domain, @domain_verified, @email_hash, @transfer_rate, @flags,
       @blackholed, @toml_name, @toml_description, @toml_icon_url, @toml_raw,
-      @has_hooks, @first_ledger, @last_updated
+      @toml_checked_ledger, @has_hooks, @first_ledger, @last_updated
     )
     ON CONFLICT(account) DO UPDATE SET
       domain = excluded.domain,
@@ -68,10 +68,70 @@ export function upsertIssuer(db: SqliteDatabase, row: IssuerRow): void {
       toml_description = excluded.toml_description,
       toml_icon_url = excluded.toml_icon_url,
       toml_raw = excluded.toml_raw,
+      toml_checked_ledger = excluded.toml_checked_ledger,
       has_hooks = excluded.has_hooks,
       last_updated = excluded.last_updated
     `,
   ).run(row);
+}
+
+export function updateIssuerToml(
+  db: SqliteDatabase,
+  row: Pick<
+    IssuerRow,
+    | 'account'
+    | 'domain_verified'
+    | 'toml_name'
+    | 'toml_description'
+    | 'toml_icon_url'
+    | 'toml_raw'
+    | 'toml_checked_ledger'
+  >,
+): void {
+  db.prepare(
+    `
+    UPDATE issuers SET
+      domain_verified = @domain_verified,
+      toml_name = @toml_name,
+      toml_description = @toml_description,
+      toml_icon_url = @toml_icon_url,
+      toml_raw = @toml_raw,
+      toml_checked_ledger = @toml_checked_ledger
+    WHERE account = @account
+    `,
+  ).run(row);
+}
+
+export function invalidateIssuerToml(db: SqliteDatabase, account: string): void {
+  db.prepare(
+    `
+    UPDATE issuers SET
+      domain_verified = 0,
+      toml_name = NULL,
+      toml_description = NULL,
+      toml_icon_url = NULL,
+      toml_raw = NULL,
+      toml_checked_ledger = NULL
+    WHERE account = ?
+    `,
+  ).run(account);
+}
+
+export function listIssuersDueForToml(
+  db: SqliteDatabase,
+  ledger: number,
+  interval = 1000,
+): IssuerRow[] {
+  return db
+    .prepare(
+      `
+      SELECT * FROM issuers
+      WHERE domain IS NOT NULL AND domain != ''
+        AND (toml_checked_ledger IS NULL OR (? - toml_checked_ledger) >= ?)
+      ORDER BY account ASC
+      `,
+    )
+    .all(ledger, interval) as IssuerRow[];
 }
 
 export function listIssuers(

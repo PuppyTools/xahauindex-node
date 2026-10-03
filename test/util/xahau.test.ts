@@ -4,12 +4,14 @@ import { describe, it } from 'node:test';
 import {
   addDecimal,
   decodeCurrency,
+  dropsToXah,
   hexToUtf8,
   isBlackholed,
   isZeroDecimal,
   LSF_DISABLE_MASTER,
   negateDecimal,
   normalizePair,
+  subtractDecimal,
 } from '../../src/util/xahau.js';
 
 describe('currency helpers', () => {
@@ -36,6 +38,9 @@ describe('decimals', () => {
     assert.equal(addDecimal('-5', '2'), '-3');
     assert.equal(negateDecimal('12.0'), '-12.0');
     assert.ok(isZeroDecimal('0.000'));
+    assert.equal(subtractDecimal('2.5', '1.25'), '1.25');
+    assert.equal(dropsToXah('1000000'), '1');
+    assert.equal(dropsToXah('1500000'), '1.5');
   });
 });
 
