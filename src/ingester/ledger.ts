@@ -1,6 +1,7 @@
 import type { SqliteDatabase } from '../db/client.js';
 import { getIndexerState, hasLedger, upsertLedger } from '../db/queries/indexer.js';
 import { recomputeTokenAggregates } from '../db/queries/tokens.js';
+import type { DexTradeRow } from '../types/db.js';
 import { serializeAmount } from '../util/xahau.js';
 import { applyExecutedOffers } from './dex.js';
 import { parseAffectedNode, parseLedgerTx } from './guards.js';
@@ -11,6 +12,8 @@ import {
 } from './objects.js';
 import type { ClosedLedger } from './source.js';
 
+export type UriTokenLiveEvent = 'mint' | 'burn' | 'transfer' | 'update';
+
 export interface ApplyClosedLedgerResult {
   applied: boolean;
   skipped: boolean;
@@ -18,6 +21,29 @@ export interface ApplyClosedLedgerResult {
   index: number;
   txApplied: number;
   tokensTouched: number;
+  tokenIds: string[];
+  uriTokenEvents: Array<{ id: string; event: UriTokenLiveEvent }>;
+  hookAccounts: string[];
+  trades: Array<Omit<DexTradeRow, 'id'>>;
+}
+
+function emptyResult(
+  index: number,
+  extras: Pick<ApplyClosedLedgerResult, 'applied' | 'skipped'> &
+    Partial<Pick<ApplyClosedLedgerResult, 'reason' | 'txApplied' | 'tokensTouched'>>,
+): ApplyClosedLedgerResult {
+  return {
+    applied: extras.applied,
+    skipped: extras.skipped,
+    index,
+    txApplied: extras.txApplied ?? 0,
+    tokensTouched: extras.tokensTouched ?? 0,
+    tokenIds: [],
+    uriTokenEvents: [],
+    hookAccounts: [],
+    trades: [],
+    ...(extras.reason === undefined ? {} : { reason: extras.reason }),
+  };
 }
 
 export function snapshotLedgerBound(db: SqliteDatabase): number {
@@ -32,28 +58,21 @@ export function applyClosedLedger(
   log: ApplyLogger,
 ): ApplyClosedLedgerResult {
   if (hasLedger(db, ledger.index)) {
-    return {
-      applied: false,
-      skipped: true,
-      reason: 'already_indexed',
-      index: ledger.index,
-      txApplied: 0,
-      tokensTouched: 0,
-    };
+    return emptyResult(ledger.index, { applied: false, skipped: true, reason: 'already_indexed' });
   }
   if (ledger.index <= snapshotLedgerBound(db)) {
-    return {
+    return emptyResult(ledger.index, {
       applied: false,
       skipped: true,
       reason: 'at_or_before_snapshot',
-      index: ledger.index,
-      txApplied: 0,
-      tokensTouched: 0,
-    };
+    });
   }
 
   const apply = db.transaction((): ApplyClosedLedgerResult => {
     const touched = new Set<string>();
+    const uriTokenEvents: ApplyClosedLedgerResult['uriTokenEvents'] = [];
+    const hookAccounts = new Set<string>();
+    const trades: ApplyClosedLedgerResult['trades'] = [];
     let txApplied = 0;
     for (const raw of ledger.transactions) {
       const tx = parseLedgerTx(raw);
@@ -88,11 +107,30 @@ export function applyClosedLedger(
         if (token) {
           touched.add(token);
         }
+        if (node.type === 'URIToken') {
+          const event =
+            node.kind === 'created'
+              ? 'mint'
+              : node.kind === 'deleted'
+                ? 'burn'
+                : typeof node.previous?.Owner === 'string' &&
+                    typeof node.fields.Owner === 'string' &&
+                    node.previous.Owner !== node.fields.Owner
+                  ? 'transfer'
+                  : 'update';
+          uriTokenEvents.push({ id: node.index, event });
+        }
+        if (node.type === 'AccountRoot' && (node.kind === 'created' || 'Hook' in node.fields)) {
+          const account = node.fields.Account;
+          if (typeof account === 'string') {
+            hookAccounts.add(account);
+          }
+        }
       }
       if (tx.transactionType === 'SetRemarks' && tx.objectId && tx.remarks !== undefined) {
         applySetRemarks(db, tx.objectId, tx.remarks, ledger.index);
       }
-      applyExecutedOffers(db, tx, nodes, ledger.index, ledger.closeTime, log);
+      trades.push(...applyExecutedOffers(db, tx, nodes, ledger.index, ledger.closeTime, log));
     }
     recomputeTokenAggregates(db, touched, ledger.index);
     upsertLedger(db, {
@@ -108,6 +146,10 @@ export function applyClosedLedger(
       index: ledger.index,
       txApplied,
       tokensTouched: touched.size,
+      tokenIds: [...touched],
+      uriTokenEvents,
+      hookAccounts: [...hookAccounts],
+      trades,
     };
   });
   return apply();

@@ -1,4 +1,6 @@
+import type { PriceSummary } from '../../types/api.js';
 import type { DexTradeRow, OhlcvCandleRow, OhlcvPeriod } from '../../types/db.js';
+import { addDecimal } from '../../util/xahau.js';
 import type { SqliteDatabase } from '../client.js';
 
 export interface PairKey {
@@ -40,12 +42,14 @@ export function listDexTrades(
     fromLedger?: number;
     toLedger?: number;
     limit: number;
+    offset?: number;
   },
 ): DexTradeRow[] {
   const where = ['base_currency = @base_currency', 'counter_currency = @counter_currency'];
   const params: Record<string, string | number | null> = {
     ...pairParams(pair),
     limit: opts.limit,
+    offset: opts.offset ?? 0,
   };
   where.push('ifnull(base_issuer, \'\') = ifnull(@base_issuer, \'\')');
   where.push('ifnull(counter_issuer, \'\') = ifnull(@counter_issuer, \'\')');
@@ -71,10 +75,56 @@ export function listDexTrades(
       SELECT * FROM dex_trades
       WHERE ${where.join(' AND ')}
       ORDER BY close_time DESC, id DESC
-      LIMIT @limit
+      LIMIT @limit OFFSET @offset
       `,
     )
     .all(params) as DexTradeRow[];
+}
+
+export function countDexTrades(
+  db: SqliteDatabase,
+  pair: PairKey,
+  opts: {
+    from?: number;
+    to?: number;
+    fromLedger?: number;
+    toLedger?: number;
+  },
+): number {
+  const rows = listDexTrades(db, pair, { ...opts, limit: 10_000 });
+  return rows.length;
+}
+
+export function pairPriceSummary(
+  db: SqliteDatabase,
+  pair: PairKey,
+  nowSeconds = Math.floor(Date.now() / 1000),
+): PriceSummary | null {
+  const latest = listDexTrades(db, pair, { limit: 1 })[0];
+  if (!latest) {
+    return null;
+  }
+  const windowStart = nowSeconds - 86_400;
+  const window = listDexTrades(db, pair, { from: windowStart, to: nowSeconds + 1, limit: 500 });
+  const before = listDexTrades(db, pair, { to: windowStart, limit: 1 })[0];
+  let high = latest.price;
+  let low = latest.price;
+  let volume = '0';
+  for (const trade of window) {
+    high = Math.max(high, trade.price);
+    low = Math.min(low, trade.price);
+    volume = addDecimal(volume, trade.base_amount);
+  }
+  const startPrice = window.length > 0 ? window[window.length - 1]?.price : before?.price;
+  const change =
+    startPrice === undefined || startPrice === 0 ? null : (latest.price - startPrice) / startPrice;
+  return {
+    price: latest.price,
+    change_24h: change,
+    volume_24h: window.length === 0 ? '0' : volume,
+    high_24h: window.length === 0 ? null : high,
+    low_24h: window.length === 0 ? null : low,
+  };
 }
 
 export function upsertOhlcvCandle(db: SqliteDatabase, row: Omit<OhlcvCandleRow, 'id'>): void {

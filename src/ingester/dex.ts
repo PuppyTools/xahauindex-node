@@ -188,11 +188,11 @@ export function applyExecutedOffers(
   ledgerIndex: number,
   closeTime: number,
   log: ApplyLogger,
-): number {
+): Array<Omit<DexTradeRow, 'id'>> {
   const trades = extractExecutedTrades(tx, nodes, ledgerIndex, closeTime, log);
   for (const trade of trades) {
     insertDexTrade(db, trade);
     applyTradeToCandles(db, trade);
   }
-  return trades.length;
+  return trades;
 }

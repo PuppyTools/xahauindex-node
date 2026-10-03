@@ -248,6 +248,21 @@ export function upsertTrustLine(db: SqliteDatabase, row: TrustLineRow): void {
   ).run(row);
 }
 
+export function countHolders(
+  db: SqliteDatabase,
+  currency: string,
+  issuer: string,
+  nonzero: boolean,
+): number {
+  const where = nonzero
+    ? 'currency = @currency AND issuer = @issuer AND balance != @zero'
+    : 'currency = @currency AND issuer = @issuer';
+  const row = db
+    .prepare(`SELECT COUNT(*) AS n FROM trust_lines WHERE ${where}`)
+    .get({ currency, issuer, zero: '0' }) as { n: number };
+  return row.n;
+}
+
 export function listHolders(
   db: SqliteDatabase,
   currency: string,

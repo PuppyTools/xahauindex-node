@@ -1,3 +1,4 @@
+import { createHub } from './api/hub.js';
 import { buildApi } from './api/index.js';
 import { initEnv, loadConfig } from './config.js';
 import { closeDatabase, openDatabase } from './db/client.js';
@@ -11,12 +12,14 @@ const config = loadConfig();
 const log = createLogger(config.logLevel);
 const db = openDatabase(config.dbPath);
 const runtime = createRuntime();
+const hub = createHub();
 
 const app = await buildApi(
   {
     db,
     config,
     runtime,
+    hub,
   },
   config.logLevel,
 );
@@ -28,6 +31,7 @@ const ingester = startIngester({
   config,
   runtime,
   log,
+  hub,
   signal: controller.signal,
 }).catch((error: unknown) => {
   log.error({ err: error }, 'ingester failed');

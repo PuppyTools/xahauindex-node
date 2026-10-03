@@ -1,5 +1,13 @@
-import type { HookState, Issuer, Token, URIToken } from '../types/api.js';
-import type { HookAccountRow, IssuerRow, TokenRow, UriTokenRow } from '../types/db.js';
+import type { DexTrade, HookState, Issuer, OHLCVCandle, Token, TrustLine, URIToken } from '../types/api.js';
+import type {
+  DexTradeRow,
+  HookAccountRow,
+  IssuerRow,
+  OhlcvCandleRow,
+  TokenRow,
+  TrustLineRow,
+  UriTokenRow,
+} from '../types/db.js';
 
 export function boolFromInt(value: number): boolean {
   return value === 1;
@@ -77,6 +85,49 @@ export function uriTokenFromRow(
     last_updated: row.last_updated,
     ...(extras?.remarks === undefined ? {} : { remarks: extras.remarks }),
     ...(extras?.transferCount === undefined ? {} : { transfer_count: extras.transferCount }),
+  };
+}
+
+export function trustLineFromRow(row: TrustLineRow, remarks?: Record<string, string>): TrustLine {
+  return {
+    account: row.account,
+    currency: row.currency,
+    issuer: row.issuer,
+    balance: row.balance,
+    limit_peer: row.limit_peer,
+    flags: row.flags,
+    ...(remarks === undefined ? {} : { remarks }),
+  };
+}
+
+export function candleFromRow(row: OhlcvCandleRow): OHLCVCandle {
+  return {
+    open_time: row.open_time,
+    open_ledger: row.open_ledger,
+    close_ledger: row.close_ledger,
+    open: row.open,
+    high: row.high,
+    low: row.low,
+    close: row.close,
+    volume: row.volume,
+    trade_count: row.trade_count,
+  };
+}
+
+export function tradeFromRow(row: DexTradeRow): DexTrade {
+  return {
+    base_currency: row.base_currency,
+    base_issuer: row.base_issuer,
+    counter_currency: row.counter_currency,
+    counter_issuer: row.counter_issuer,
+    price: row.price,
+    base_amount: row.base_amount,
+    counter_amount: row.counter_amount,
+    taker: row.taker,
+    maker: row.maker,
+    ledger_index: row.ledger_index,
+    close_time: row.close_time,
+    tx_hash: row.tx_hash,
   };
 }
 

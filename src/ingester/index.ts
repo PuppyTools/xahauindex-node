@@ -1,3 +1,5 @@
+import { publishLedgerEvents } from '../api/publish.js';
+import type { EventHub } from '../api/hub.js';
 import type { Config } from '../config.js';
 import type { SqliteDatabase } from '../db/client.js';
 import type { Runtime } from '../runtime.js';
@@ -12,6 +14,7 @@ export async function startIngester(options: {
   runtime: Runtime;
   log: LiveLogger;
   signal?: AbortSignal;
+  hub?: EventHub;
 }): Promise<void> {
   const source = createXahauSource(options.config.xahaudUrl);
   await source.connect();
@@ -38,6 +41,15 @@ export async function startIngester(options: {
       runtime: options.runtime,
       log: options.log,
       ...(options.signal === undefined ? {} : { signal: options.signal }),
+      ...(options.hub === undefined
+        ? {}
+        : {
+            onApplied: (result) => {
+              if (options.hub) {
+                publishLedgerEvents(options.hub, options.db, result);
+              }
+            },
+          }),
     });
     const toml = runTomlWorker({
       db: options.db,

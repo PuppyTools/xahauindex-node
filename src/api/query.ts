@@ -27,6 +27,25 @@ export function parseBoolQuery(raw: unknown): boolean | undefined {
   return undefined;
 }
 
+export function parseOptionalInt(raw: unknown): number | undefined {
+  if (raw === undefined) {
+    return undefined;
+  }
+  const value = typeof raw === 'string' ? Number.parseInt(raw, 10) : typeof raw === 'number' ? raw : Number.NaN;
+  if (!Number.isInteger(value)) {
+    return undefined;
+  }
+  return value;
+}
+
+export function parseLimit(raw: unknown, fallback = 100, max = 500): number {
+  const value = parseOptionalInt(raw);
+  if (value === undefined || value < 1) {
+    return fallback;
+  }
+  return Math.min(max, value);
+}
+
 export function asQuery(query: unknown): Record<string, string | undefined> {
   if (typeof query !== 'object' || query === null) {
     return {};

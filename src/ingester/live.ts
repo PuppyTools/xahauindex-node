@@ -26,6 +26,7 @@ export async function catchUpLedgers(options: {
   log: LiveLogger;
   through: number;
   signal?: AbortSignal;
+  onApplied?: (result: ApplyClosedLedgerResult) => void;
 }): Promise<ApplyClosedLedgerResult[]> {
   const { db, source, log, through } = options;
   const applied: ApplyClosedLedgerResult[] = [];
@@ -42,6 +43,7 @@ export async function catchUpLedgers(options: {
     const result = applyClosedLedger(db, ledger, log);
     applied.push(result);
     if (result.applied) {
+      options.onApplied?.(result);
       log.info(
         { ledger: result.index, txApplied: result.txApplied, tokensTouched: result.tokensTouched },
         'live ledger applied',
@@ -78,16 +80,21 @@ export async function followLive(options: {
   runtime: Runtime;
   log: LiveLogger;
   signal?: AbortSignal;
+  onApplied?: (result: ApplyClosedLedgerResult) => void;
 }): Promise<void> {
   const { db, source, runtime, log } = options;
   const tip = await source.getValidatedLedger();
   runtime.networkLedgerIndex = tip.index;
-  await catchUpLedgers({
+  const appliedOpts = {
     db,
     source,
     log,
-    through: tip.index,
     ...(options.signal === undefined ? {} : { signal: options.signal }),
+    ...(options.onApplied === undefined ? {} : { onApplied: options.onApplied }),
+  };
+  await catchUpLedgers({
+    ...appliedOpts,
+    through: tip.index,
   });
 
   await source.subscribeLedgers();
@@ -98,11 +105,8 @@ export async function followLive(options: {
     void queue.add(async () => {
       try {
         await catchUpLedgers({
-          db,
-          source,
-          log,
+          ...appliedOpts,
           through: closed.index,
-          ...(options.signal === undefined ? {} : { signal: options.signal }),
         });
       } catch (error) {
         if (options.signal?.aborted) {
