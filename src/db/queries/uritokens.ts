@@ -56,6 +56,20 @@ export function upsertUriToken(db: SqliteDatabase, row: UriTokenRow): void {
   ).run(row);
 }
 
+export function markUriTokenBurned(db: SqliteDatabase, id: string, ledger: number): void {
+  db.prepare(
+    `
+    UPDATE uri_tokens SET
+      burned = 1,
+      burn_ledger = @ledger,
+      sell_offer = NULL,
+      destination = NULL,
+      last_updated = @ledger
+    WHERE id = @id
+    `,
+  ).run({ id, ledger });
+}
+
 export function insertUriTokenTransfer(
   db: SqliteDatabase,
   row: Omit<UriTokenTransferRow, 'id'>,

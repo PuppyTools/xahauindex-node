@@ -1,10 +1,12 @@
 import type {
   AccountRootObject,
+  AffectedNode,
   Amount,
   HookEntry,
   IssuedAmount,
   LedgerRemark,
   RippleStateObject,
+  TxMeta,
   URITokenObject,
 } from '../types/xahau.js';
 
@@ -150,4 +152,145 @@ export function parseAccountRoot(value: unknown): AccountRootObject | undefined 
     ...(remarks === undefined ? {} : { Remarks: remarks }),
     ...(previousTxnLgrSeq === undefined ? {} : { PreviousTxnLgrSeq: previousTxnLgrSeq }),
   };
+}
+
+export type AffectedKind = 'created' | 'modified' | 'deleted';
+
+export interface ParsedAffectedNode {
+  kind: AffectedKind;
+  type: string;
+  index: string;
+  fields: Record<string, unknown>;
+  previous?: Record<string, unknown>;
+}
+
+export function parseAffectedNode(value: unknown): ParsedAffectedNode | undefined {
+  if (!isRecord(value)) {
+    return undefined;
+  }
+  if (isRecord(value.CreatedNode)) {
+    const type = asString(value.CreatedNode.LedgerEntryType);
+    const index = asString(value.CreatedNode.LedgerIndex);
+    if (!type || !index || !isRecord(value.CreatedNode.NewFields)) {
+      return undefined;
+    }
+    return { kind: 'created', type, index, fields: value.CreatedNode.NewFields };
+  }
+  if (isRecord(value.ModifiedNode)) {
+    const type = asString(value.ModifiedNode.LedgerEntryType);
+    const index = asString(value.ModifiedNode.LedgerIndex);
+    if (!type || !index) {
+      return undefined;
+    }
+    const fields = isRecord(value.ModifiedNode.FinalFields) ? value.ModifiedNode.FinalFields : {};
+    const previous = isRecord(value.ModifiedNode.PreviousFields)
+      ? value.ModifiedNode.PreviousFields
+      : undefined;
+    return {
+      kind: 'modified',
+      type,
+      index,
+      fields,
+      ...(previous === undefined ? {} : { previous }),
+    };
+  }
+  if (isRecord(value.DeletedNode)) {
+    const type = asString(value.DeletedNode.LedgerEntryType);
+    const index = asString(value.DeletedNode.LedgerIndex);
+    if (!type || !index) {
+      return undefined;
+    }
+    const fields = isRecord(value.DeletedNode.FinalFields) ? value.DeletedNode.FinalFields : {};
+    return { kind: 'deleted', type, index, fields };
+  }
+  return undefined;
+}
+
+export interface ParsedLedgerTx {
+  hash: string;
+  transactionType: string;
+  account: string;
+  result: string;
+  affectedNodes: AffectedNode[];
+  objectId?: string;
+  remarks?: unknown;
+  amount?: Amount;
+  uriTokenId?: string;
+}
+
+function parseTxMeta(value: unknown): TxMeta | undefined {
+  if (!isRecord(value)) {
+    return undefined;
+  }
+  const result = asString(value.TransactionResult);
+  const nodes = Array.isArray(value.AffectedNodes) ? (value.AffectedNodes as AffectedNode[]) : [];
+  return {
+    ...(result === undefined ? {} : { TransactionResult: result }),
+    AffectedNodes: nodes,
+  };
+}
+
+function flattenLedgerTx(value: unknown): Record<string, unknown> | undefined {
+  if (typeof value === 'string' || !isRecord(value)) {
+    return undefined;
+  }
+  if (isRecord(value.tx_json)) {
+    const hash = asString(value.hash) ?? asString(value.tx_json.hash);
+    return {
+      ...value.tx_json,
+      ...(hash === undefined ? {} : { hash }),
+      meta: value.meta ?? value.metaData ?? value.tx_json.meta,
+    };
+  }
+  if (isRecord(value.transaction)) {
+    const hash = asString(value.hash) ?? asString(value.transaction.hash);
+    return {
+      ...value.transaction,
+      ...(hash === undefined ? {} : { hash }),
+      meta: value.meta ?? value.metaData ?? value.metadata ?? value.transaction.meta,
+    };
+  }
+  return {
+    ...value,
+    meta: value.meta ?? value.metaData ?? value.metadata,
+  };
+}
+
+export function parseLedgerTx(value: unknown): ParsedLedgerTx | undefined {
+  const flat = flattenLedgerTx(value);
+  if (!flat) {
+    return undefined;
+  }
+  const transactionType = asString(flat.TransactionType);
+  const account = asString(flat.Account);
+  if (!transactionType || !account) {
+    return undefined;
+  }
+  const meta = parseTxMeta(flat.meta);
+  const engineResult = asString(flat.engine_result);
+  const result = meta?.TransactionResult ?? engineResult ?? '';
+  const hash = asString(flat.hash) ?? '';
+  const objectId = asString(flat.ObjectID);
+  const uriTokenId = asString(flat.URITokenID);
+  const amount = parseAmount(flat.Amount);
+  const parsed: ParsedLedgerTx = {
+    hash,
+    transactionType,
+    account,
+    result,
+    affectedNodes: meta?.AffectedNodes ?? [],
+  };
+  if (objectId !== undefined) {
+    parsed.objectId = objectId;
+  }
+  if (flat.Remarks !== undefined) {
+    parsed.remarks = flat.Remarks;
+  }
+  if (amount !== undefined) {
+    parsed.amount = amount;
+  }
+  if (uriTokenId !== undefined) {
+    parsed.uriTokenId = uriTokenId;
+  }
+  return parsed;
 }

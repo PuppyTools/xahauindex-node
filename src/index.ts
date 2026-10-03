@@ -21,8 +21,22 @@ const app = await buildApi(
   config.logLevel,
 );
 
+const controller = new AbortController();
+
+const ingester = startIngester({
+  db,
+  config,
+  runtime,
+  log,
+  signal: controller.signal,
+}).catch((error: unknown) => {
+  log.error({ err: error }, 'ingester failed');
+});
+
 const shutdown = async (signal: string): Promise<void> => {
   log.info({ signal }, 'shutting down');
+  controller.abort();
+  await ingester;
   await app.close();
   closeDatabase(db);
   process.exit(0);
@@ -40,7 +54,3 @@ log.info(
   { host: config.apiHost, port: config.apiPort, dbPath: config.dbPath },
   'xahauindex listening',
 );
-
-void startIngester({ db, config, runtime, log }).catch((error: unknown) => {
-  log.error({ err: error }, 'ingester failed');
-});

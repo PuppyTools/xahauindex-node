@@ -1,10 +1,21 @@
 import type { SqliteDatabase } from '../db/client.js';
-import { upsertHookAccount } from '../db/queries/hooks.js';
-import { ensureIssuer, updateIssuerOnChain } from '../db/queries/issuers.js';
-import { deleteRemark, upsertRemark } from '../db/queries/remarks.js';
-import { ensureToken, tokenId, updateTokenDisplay, upsertTrustLine } from '../db/queries/tokens.js';
-import { upsertUriToken } from '../db/queries/uritokens.js';
-import type { AccountRootObject, RippleStateObject, URITokenObject } from '../types/xahau.js';
+import { getHookAccount, upsertHookAccount } from '../db/queries/hooks.js';
+import { ensureIssuer, getIssuer, updateIssuerOnChain } from '../db/queries/issuers.js';
+import { deleteRemark, listRemarksByObject, upsertRemark } from '../db/queries/remarks.js';
+import {
+  deleteTrustLine,
+  ensureToken,
+  tokenId,
+  updateTokenDisplay,
+  upsertTrustLine,
+} from '../db/queries/tokens.js';
+import {
+  getUriToken,
+  insertUriTokenTransfer,
+  markUriTokenBurned,
+  upsertUriToken,
+} from '../db/queries/uritokens.js';
+import type { Amount, AccountRootObject, RippleStateObject, URITokenObject } from '../types/xahau.js';
 import {
   absDecimal,
   decodeCurrency,
@@ -15,7 +26,12 @@ import {
   negateDecimal,
   serializeAmount,
 } from '../util/xahau.js';
-import { parseAccountRoot, parseRippleState, parseUriToken } from './guards.js';
+import {
+  parseAccountRoot,
+  parseRippleState,
+  parseUriToken,
+  type ParsedAffectedNode,
+} from './guards.js';
 import { normalizeHookEntries } from './hooks.js';
 import { parseRemarkArray, remarksToDisplay } from './remarks.js';
 
@@ -109,7 +125,7 @@ export function interpretRippleState(object: RippleStateObject): TrustLineView |
   return null;
 }
 
-function persistRemarks(
+export function persistRemarks(
   db: SqliteDatabase,
   objectId: string,
   objectType: string,
@@ -143,11 +159,11 @@ export function applyRippleState(
   object: RippleStateObject,
   ledger: number,
   log: ApplyLogger,
-): void {
+): string | null {
   const view = interpretRippleState(object);
   if (!view) {
     log.warn({ index: object.index }, 'skipping RippleState with no issuer/holder');
-    return;
+    return null;
   }
   ensureIssuer(db, view.issuer, ledger);
   const id = tokenId(view.currency, view.issuer);
@@ -184,6 +200,21 @@ export function applyRippleState(
       ...(display.websiteUrl === undefined ? {} : { website_url: display.websiteUrl }),
     });
   }
+  return id;
+}
+
+export function applyDeletedRippleState(
+  db: SqliteDatabase,
+  object: RippleStateObject,
+  log: ApplyLogger,
+): string | null {
+  const view = interpretRippleState(object);
+  if (!view) {
+    log.warn({ index: object.index }, 'skipping deleted RippleState with no issuer/holder');
+    return null;
+  }
+  deleteTrustLine(db, `${view.holder}:${view.currency}:${view.issuer}`);
+  return tokenId(view.currency, view.issuer);
 }
 
 export function applyUriToken(
@@ -192,33 +223,90 @@ export function applyUriToken(
   ledger: number,
   log: ApplyLogger,
 ): void {
+  applyUriTokenFields(db, object, ledger, log);
+}
+
+export function applyUriTokenFields(
+  db: SqliteDatabase,
+  object: URITokenObject,
+  ledger: number,
+  log: ApplyLogger,
+  options?: {
+    fields?: Record<string, unknown>;
+    previous?: Record<string, unknown>;
+    transfer?: { txHash: string; price: string | null };
+  },
+): string | null {
   const id = object.index ?? object.URITokenID;
   if (!id) {
     log.warn({ issuer: object.Issuer }, 'skipping URIToken without id');
-    return;
+    return null;
   }
   if (!isValidAccount(object.Issuer) || !isValidAccount(object.Owner)) {
     log.warn({ id }, 'skipping URIToken with invalid account');
-    return;
+    return null;
   }
   ensureIssuer(db, object.Issuer, ledger);
+  const existing = getUriToken(db, id);
+  const fields = options?.fields;
+  const previous = options?.previous;
+  const sellOffer = resolveMergedAmount(object.Amount, existing?.sell_offer ?? null, fields, previous, 'Amount');
+  const destination = resolveMergedString(
+    object.Destination,
+    existing?.destination ?? null,
+    fields,
+    previous,
+    'Destination',
+  );
   const uri = hexToUtf8(object.URI) || object.URI;
   upsertUriToken(db, {
     id,
     uri,
     uri_raw: object.URI,
-    digest: object.Digest ?? null,
+    digest: object.Digest ?? existing?.digest ?? null,
     issuer: object.Issuer,
     owner: object.Owner,
-    flags: object.Flags ?? null,
-    sell_offer: serializeAmount(object.Amount),
-    destination: object.Destination ?? null,
+    flags: object.Flags ?? existing?.flags ?? null,
+    sell_offer: sellOffer,
+    destination,
     burned: 0,
-    burn_ledger: null,
-    mint_ledger: object.PreviousTxnLgrSeq ?? ledger,
+    burn_ledger: existing?.burn_ledger ?? null,
+    mint_ledger: existing?.mint_ledger ?? object.PreviousTxnLgrSeq ?? ledger,
     last_updated: ledger,
   });
-  persistRemarks(db, id, 'URIToken', object.Remarks, ledger, { uriTokenId: id });
+  if (fields === undefined || 'Remarks' in fields) {
+    persistRemarks(db, id, 'URIToken', object.Remarks, ledger, { uriTokenId: id });
+  }
+
+  const previousOwner =
+    previous !== undefined && typeof previous.Owner === 'string' ? previous.Owner : undefined;
+  const createdTransfer =
+    previousOwner === undefined && existing === undefined && object.Owner !== object.Issuer;
+  const ownerChanged = previousOwner !== undefined && previousOwner !== object.Owner;
+  if ((createdTransfer || ownerChanged) && options?.transfer && options.transfer.txHash !== '') {
+    insertUriTokenTransfer(db, {
+      uri_token_id: id,
+      from_account: previousOwner ?? object.Issuer,
+      to_account: object.Owner,
+      price: options.transfer.price,
+      ledger_index: ledger,
+      tx_hash: options.transfer.txHash,
+    });
+  }
+  return id;
+}
+
+export function applyDeletedUriToken(
+  db: SqliteDatabase,
+  object: URITokenObject,
+  ledger: number,
+  log: ApplyLogger,
+): void {
+  const id = applyUriTokenFields(db, object, ledger, log);
+  if (!id) {
+    return;
+  }
+  markUriTokenBurned(db, id, ledger);
 }
 
 export type AccountRootCache = Map<string, AccountRootObject>;
@@ -229,55 +317,107 @@ export function cacheAccountRoot(cache: AccountRootCache, object: AccountRootObj
   }
 }
 
-export function applyAccountRoot(db: SqliteDatabase, object: AccountRootObject, ledger: number): void {
+export function applyAccountRoot(
+  db: SqliteDatabase,
+  object: AccountRootObject,
+  ledger: number,
+  fields?: Record<string, unknown>,
+): void {
   if (!isValidAccount(object.Account)) {
     return;
   }
+  const existingIssuer = getIssuer(db, object.Account);
+  const hookFieldsPresent = fields === undefined || 'Hook' in fields;
   const hooks = object.Hook ? normalizeHookEntries(object.Hook) : [];
-  const hasHooks = hooks.length > 0;
-  const domain = object.Domain ? hexToUtf8(object.Domain) || null : null;
-  const blackholed = isBlackholed(object.Flags, object.RegularKey) ? 1 : 0;
-  const knownIssuer = issuerExists(db, object.Account);
+  const hasHooks = hookFieldsPresent ? hooks.length > 0 : existingIssuer?.has_hooks === 1;
+  const domain =
+    fields !== undefined && !('Domain' in fields)
+      ? (existingIssuer?.domain ?? null)
+      : object.Domain
+        ? hexToUtf8(object.Domain) || null
+        : null;
+  const flags =
+    fields !== undefined && !('Flags' in fields) ? (existingIssuer?.flags ?? null) : (object.Flags ?? null);
+  const emailHash =
+    fields !== undefined && !('EmailHash' in fields)
+      ? (existingIssuer?.email_hash ?? null)
+      : (object.EmailHash ?? null);
+  const transferRate =
+    fields !== undefined && !('TransferRate' in fields)
+      ? (existingIssuer?.transfer_rate ?? null)
+      : (object.TransferRate ?? null);
+  const blackholed =
+    fields !== undefined && !('Flags' in fields)
+      ? (existingIssuer?.blackholed ?? 0)
+      : isBlackholed(object.Flags, object.RegularKey)
+        ? 1
+        : 0;
+  const knownIssuer = existingIssuer !== undefined;
 
   if (domain || hasHooks || knownIssuer) {
     ensureIssuer(db, object.Account, ledger);
     updateIssuerOnChain(db, {
       account: object.Account,
       domain,
-      email_hash: object.EmailHash ?? null,
-      transfer_rate: object.TransferRate ?? null,
-      flags: object.Flags ?? null,
+      email_hash: emailHash,
+      transfer_rate: transferRate,
+      flags,
       blackholed,
       has_hooks: hasHooks ? 1 : 0,
       last_updated: ledger,
     });
   }
 
-  if (hasHooks) {
-    const existing = db
-      .prepare('SELECT first_ledger FROM hook_accounts WHERE account = ?')
-      .get(object.Account) as { first_ledger: number } | undefined;
-    upsertHookAccount(db, {
-      account: object.Account,
-      hook_count: hooks.length,
-      hooks_json: JSON.stringify(hooks),
-      first_ledger: existing?.first_ledger ?? ledger,
-      last_updated: ledger,
-    });
+  if (hookFieldsPresent) {
+    const existingHook = getHookAccount(db, object.Account);
+    if (hasHooks || existingHook) {
+      upsertHookAccount(db, {
+        account: object.Account,
+        hook_count: hooks.length,
+        hooks_json: JSON.stringify(hooks),
+        first_ledger: existingHook?.first_ledger ?? ledger,
+        last_updated: ledger,
+      });
+    }
   }
 
-  if (object.index) {
+  if (object.index && (fields === undefined || 'Remarks' in fields)) {
     persistRemarks(db, object.index, 'AccountRoot', object.Remarks, ledger, {
       account: object.Account,
     });
   }
 }
 
-function issuerExists(db: SqliteDatabase, account: string): boolean {
-  const row = db.prepare('SELECT account FROM issuers WHERE account = ?').get(account) as
-    | { account: string }
-    | undefined;
-  return row !== undefined;
+function resolveMergedAmount(
+  parsed: Amount | undefined,
+  existing: string | null,
+  fields: Record<string, unknown> | undefined,
+  previous: Record<string, unknown> | undefined,
+  key: string,
+): string | null {
+  if (fields === undefined || key in fields) {
+    return serializeAmount(parsed);
+  }
+  if (previous !== undefined && key in previous) {
+    return null;
+  }
+  return existing;
+}
+
+function resolveMergedString(
+  parsed: string | undefined,
+  existing: string | null,
+  fields: Record<string, unknown> | undefined,
+  previous: Record<string, unknown> | undefined,
+  key: string,
+): string | null {
+  if (fields === undefined || key in fields) {
+    return parsed ?? null;
+  }
+  if (previous !== undefined && key in previous) {
+    return null;
+  }
+  return existing;
 }
 
 export function applyCachedAccountRoots(
@@ -313,5 +453,91 @@ export function applyLedgerObject(
     if (account.Domain || (account.Hook && account.Hook.length > 0)) {
       applyAccountRoot(db, account, ledger);
     }
+  }
+}
+
+export function applyAffectedLedgerNode(
+  db: SqliteDatabase,
+  node: ParsedAffectedNode,
+  ledger: number,
+  log: ApplyLogger,
+  transfer?: { txHash: string; price: string | null },
+): string | null {
+  const raw = { LedgerEntryType: node.type, index: node.index, ...node.fields };
+  if (node.type === 'RippleState') {
+    const ripple = parseRippleState(raw);
+    if (!ripple) {
+      log.warn({ index: node.index, kind: node.kind }, 'skipping malformed RippleState node');
+      return null;
+    }
+    if (node.kind === 'deleted') {
+      return applyDeletedRippleState(db, ripple, log);
+    }
+    return applyRippleState(db, ripple, ledger, log);
+  }
+  if (node.type === 'URIToken') {
+    const uriToken = parseUriToken(raw);
+    if (!uriToken) {
+      log.warn({ index: node.index, kind: node.kind }, 'skipping malformed URIToken node');
+      return null;
+    }
+    if (node.kind === 'deleted') {
+      applyDeletedUriToken(db, uriToken, ledger, log);
+      return null;
+    }
+    applyUriTokenFields(db, uriToken, ledger, log, {
+      fields: node.fields,
+      ...(node.previous === undefined ? {} : { previous: node.previous }),
+      ...(transfer === undefined ? {} : { transfer }),
+    });
+    return null;
+  }
+  if (node.type === 'AccountRoot') {
+    const account = parseAccountRoot(raw);
+    if (!account) {
+      return null;
+    }
+    applyAccountRoot(db, account, ledger, node.fields);
+  }
+  return null;
+}
+
+export function resolveRemarkTarget(
+  db: SqliteDatabase,
+  objectId: string,
+): { objectType: string; links: { uriTokenId?: string; account?: string; tokenId?: string } } {
+  const uri = getUriToken(db, objectId);
+  if (uri) {
+    return { objectType: 'URIToken', links: { uriTokenId: objectId } };
+  }
+  const existing = listRemarksByObject(db, objectId)[0];
+  if (existing) {
+    return {
+      objectType: existing.object_type,
+      links: {
+        ...(existing.uri_token_id === null ? {} : { uriTokenId: existing.uri_token_id }),
+        ...(existing.account === null ? {} : { account: existing.account }),
+        ...(existing.token_id === null ? {} : { tokenId: existing.token_id }),
+      },
+    };
+  }
+  return { objectType: 'Other', links: {} };
+}
+
+export function applySetRemarks(
+  db: SqliteDatabase,
+  objectId: string,
+  remarks: unknown,
+  ledger: number,
+): void {
+  const target = resolveRemarkTarget(db, objectId);
+  const display = persistRemarks(db, objectId, target.objectType, remarks, ledger, target.links);
+  if (target.links.tokenId) {
+    updateTokenDisplay(db, target.links.tokenId, {
+      ...(display.name === undefined ? {} : { name: display.name }),
+      ...(display.description === undefined ? {} : { description: display.description }),
+      ...(display.iconUrl === undefined ? {} : { icon_url: display.iconUrl }),
+      ...(display.websiteUrl === undefined ? {} : { website_url: display.websiteUrl }),
+    });
   }
 }

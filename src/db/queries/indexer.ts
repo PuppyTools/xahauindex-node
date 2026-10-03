@@ -33,6 +33,13 @@ export function setIndexerState(db: SqliteDatabase, key: string, value: string):
   ).run(key, value);
 }
 
+export function hasLedger(db: SqliteDatabase, ledgerIndex: number): boolean {
+  const row = db.prepare('SELECT 1 AS ok FROM ledgers WHERE ledger_index = ?').get(ledgerIndex) as
+    | { ok: number }
+    | undefined;
+  return row !== undefined;
+}
+
 export function getLatestLedgerIndex(db: SqliteDatabase): number {
   const row = db.prepare('SELECT MAX(ledger_index) AS i FROM ledgers').get() as
     | { i: number | null }

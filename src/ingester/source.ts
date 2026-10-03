@@ -1,4 +1,4 @@
-import { Client, rippleTimeToUnixTime } from '@transia/xrpl';
+import { Client, rippleTimeToUnixTime, type LedgerStream } from '@transia/xrpl';
 
 export interface ValidatedLedger {
   index: number;
@@ -11,12 +11,25 @@ export interface LedgerDataPageResult {
   marker?: unknown;
 }
 
+export interface ClosedLedger {
+  index: number;
+  hash: string;
+  closeTime: number;
+  transactions: unknown[];
+}
+
 export interface LedgerSource {
   getValidatedLedger(): Promise<ValidatedLedger>;
   getLedgerDataPage(ledgerIndex: number, marker?: unknown): Promise<LedgerDataPageResult>;
 }
 
-interface ConnectableSource extends LedgerSource {
+export interface LiveLedgerSource extends LedgerSource {
+  getLedgerWithTransactions(ledgerIndex: number): Promise<ClosedLedger>;
+  subscribeLedgers(): Promise<void>;
+  onLedgerClosed(handler: (ledger: ValidatedLedger) => void): () => void;
+}
+
+export interface XahauSource extends LiveLedgerSource {
   connect(): Promise<void>;
   disconnect(): Promise<void>;
 }
@@ -25,13 +38,32 @@ function unixSecondsFromRipple(rippleTime: number): number {
   return Math.floor(rippleTimeToUnixTime(rippleTime) / 1000);
 }
 
-export function createXahauSource(url: string): ConnectableSource {
+function asLedgerRecord(value: unknown): Record<string, unknown> {
+  return typeof value === 'object' && value !== null ? (value as Record<string, unknown>) : {};
+}
+
+export function createXahauSource(url: string): XahauSource {
   const client = new Client(url);
+  const listeners = new Set<(ledger: ValidatedLedger) => void>();
+
+  const onClosed = (ledger: LedgerStream): void => {
+    const closed: ValidatedLedger = {
+      index: ledger.ledger_index,
+      hash: ledger.ledger_hash,
+      closeTime: unixSecondsFromRipple(ledger.ledger_time),
+    };
+    for (const handler of listeners) {
+      handler(closed);
+    }
+  };
+
   return {
     connect: async () => {
       await client.connect();
     },
     disconnect: async () => {
+      client.off('ledgerClosed', onClosed);
+      listeners.clear();
       await client.disconnect();
     },
     getValidatedLedger: async () => {
@@ -70,6 +102,40 @@ export function createXahauSource(url: string): ConnectableSource {
         page.marker = result.marker;
       }
       return page;
+    },
+    getLedgerWithTransactions: async (ledgerIndex) => {
+      const response = (await client.request({
+        command: 'ledger',
+        ledger_index: ledgerIndex,
+        transactions: true,
+        expand: true,
+      } as unknown as Parameters<Client['request']>[0])) as {
+        result: {
+          ledger_index?: number;
+          ledger_hash?: string;
+          ledger?: Record<string, unknown>;
+        };
+      };
+      const ledger = asLedgerRecord(response.result.ledger);
+      const index = Number(response.result.ledger_index ?? ledger.ledger_index ?? ledgerIndex);
+      const hash = String(response.result.ledger_hash ?? ledger.ledger_hash ?? '');
+      const closeTime = unixSecondsFromRipple(Number(ledger.close_time ?? 0));
+      const transactions = Array.isArray(ledger.transactions) ? ledger.transactions : [];
+      return { index, hash, closeTime, transactions };
+    },
+    subscribeLedgers: async () => {
+      client.off('ledgerClosed', onClosed);
+      client.on('ledgerClosed', onClosed);
+      await client.request({
+        command: 'subscribe',
+        streams: ['ledger'],
+      });
+    },
+    onLedgerClosed: (handler) => {
+      listeners.add(handler);
+      return () => {
+        listeners.delete(handler);
+      };
     },
   };
 }

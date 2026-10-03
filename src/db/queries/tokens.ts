@@ -59,10 +59,17 @@ export function syncTokenIssuerFlags(db: SqliteDatabase): void {
   `);
 }
 
-export function recomputeTokenAggregates(db: SqliteDatabase): void {
-  const lines = db
-    .prepare('SELECT currency, issuer, account, balance FROM trust_lines')
-    .all() as Array<{ currency: string; issuer: string; account: string; balance: string }>;
+export function splitTokenId(id: string): { currency: string; issuer: string } {
+  const sep = id.indexOf(':');
+  if (sep <= 0 || sep === id.length - 1) {
+    return { currency: id, issuer: '' };
+  }
+  return { currency: id.slice(0, sep), issuer: id.slice(sep + 1) };
+}
+
+function aggregateLines(
+  lines: Array<{ currency: string; issuer: string; account: string; balance: string }>,
+): Map<string, { holders: number; trusts: number; supply: string }> {
   const aggregates = new Map<string, { holders: number; trusts: number; supply: string }>();
   for (const line of lines) {
     const id = tokenId(line.currency, line.issuer);
@@ -74,21 +81,64 @@ export function recomputeTokenAggregates(db: SqliteDatabase): void {
     }
     aggregates.set(id, current);
   }
+  return aggregates;
+}
+
+export function recomputeTokenAggregates(
+  db: SqliteDatabase,
+  tokenIds?: Iterable<string>,
+  ledger?: number,
+): void {
+  const scoped = tokenIds === undefined ? undefined : [...new Set(tokenIds)];
+  if (scoped !== undefined && scoped.length === 0) {
+    return;
+  }
+
   const update = db.prepare(
     `
     UPDATE tokens SET
       holder_count = @holder_count,
       trust_count = @trust_count,
       supply = @supply
+      ${ledger === undefined ? '' : ', last_updated = @last_updated'}
     WHERE id = @id
     `,
   );
-  for (const [id, agg] of aggregates) {
+
+  if (scoped === undefined) {
+    const lines = db
+      .prepare('SELECT currency, issuer, account, balance FROM trust_lines')
+      .all() as Array<{ currency: string; issuer: string; account: string; balance: string }>;
+    for (const [id, agg] of aggregateLines(lines)) {
+      update.run({
+        id,
+        holder_count: agg.holders,
+        trust_count: agg.trusts,
+        supply: agg.supply,
+        ...(ledger === undefined ? {} : { last_updated: ledger }),
+      });
+    }
+    return;
+  }
+
+  const select = db.prepare(
+    'SELECT currency, issuer, account, balance FROM trust_lines WHERE currency = ? AND issuer = ?',
+  );
+  for (const id of scoped) {
+    const { currency, issuer } = splitTokenId(id);
+    const lines = select.all(currency, issuer) as Array<{
+      currency: string;
+      issuer: string;
+      account: string;
+      balance: string;
+    }>;
+    const agg = aggregateLines(lines).get(id) ?? { holders: 0, trusts: 0, supply: '0' };
     update.run({
       id,
       holder_count: agg.holders,
       trust_count: agg.trusts,
       supply: agg.supply,
+      ...(ledger === undefined ? {} : { last_updated: ledger }),
     });
   }
 }
@@ -156,6 +206,14 @@ export function countTokens(db: SqliteDatabase, filter: TokenListFilter): number
   const { clause, params } = tokenFilterSql(filter);
   const row = db.prepare(`SELECT COUNT(*) AS n FROM tokens ${clause}`).get(params) as { n: number };
   return row.n;
+}
+
+export function getTrustLine(db: SqliteDatabase, id: string): TrustLineRow | undefined {
+  return db.prepare('SELECT * FROM trust_lines WHERE id = ?').get(id) as TrustLineRow | undefined;
+}
+
+export function deleteTrustLine(db: SqliteDatabase, id: string): void {
+  db.prepare('DELETE FROM trust_lines WHERE id = ?').run(id);
 }
 
 export function upsertTrustLine(db: SqliteDatabase, row: TrustLineRow): void {
