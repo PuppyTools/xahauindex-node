@@ -181,7 +181,10 @@ describe('runSnapshot', () => {
       },
     };
 
-    await assert.rejects(() => runSnapshot({ db, source: flaky, log: silentLog }), /ws drop/);
+    await assert.rejects(
+      () => runSnapshot({ db, source: flaky, log: silentLog, pageAttempts: 1 }),
+      /ws drop/,
+    );
     assert.equal(getIndexerState(db, 'snapshot_status'), 'running');
     assert.ok(getToken(db, `USD:${ISSUER}`));
 

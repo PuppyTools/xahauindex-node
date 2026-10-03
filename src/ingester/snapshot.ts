@@ -41,6 +41,7 @@ export async function runSnapshot(options: {
   db: SqliteDatabase;
   source: LedgerSource;
   log: SnapshotLogger;
+  pageAttempts?: number;
 }): Promise<SnapshotResult> {
   const { db, source, log } = options;
   if (getIndexerState(db, 'snapshot_status') === 'complete') {
@@ -72,7 +73,7 @@ export async function runSnapshot(options: {
     const page = await retry(() => source.getLedgerDataPage(snapshotLedger, marker), {
       minMs: 1_000,
       maxMs: 30_000,
-      attempts: 6,
+      attempts: options.pageAttempts ?? 6,
     });
     const apply = db.transaction(() => {
       for (const item of page.state) {
