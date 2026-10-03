@@ -1,7 +1,8 @@
 import type { FastifyPluginAsync } from 'fastify';
 
-import { getIndexerState, getLatestLedgerIndex } from '../../db/queries/indexer.js';
+import { getLatestLedgerIndex } from '../../db/queries/indexer.js';
 import { countDexTrades, listDexTrades, listOhlcvCandles } from '../../db/queries/dex.js';
+import { readHistoryStartLedger } from '../../db/queries/status.js';
 import type { OhlcvPeriod } from '../../types/db.js';
 import { candleFromRow, tradeFromRow } from '../mappers.js';
 import { parseRequestedPair } from '../pair.js';
@@ -25,15 +26,6 @@ function rangeOpts(query: Record<string, string | undefined>): {
   };
 }
 
-function historyStart(db: Parameters<typeof getIndexerState>[0]): number | null {
-  const raw = getIndexerState(db, 'live_from_ledger');
-  if (raw === undefined) {
-    return null;
-  }
-  const parsed = Number.parseInt(raw, 10);
-  return Number.isInteger(parsed) ? parsed : null;
-}
-
 export const priceRoutes: FastifyPluginAsync = async (app) => {
   app.get('/v1/prices/:base/:counter', async (request) => {
     const params = request.params as { base: string; counter: string };
@@ -47,7 +39,7 @@ export const priceRoutes: FastifyPluginAsync = async (app) => {
       limit,
       ...rangeOpts(query),
     });
-    const start = historyStart(app.db);
+    const start = readHistoryStartLedger(app.db);
     return {
       data: rows.map((row) => candleFromRow(row)),
       meta: {
@@ -72,7 +64,7 @@ export const priceRoutes: FastifyPluginAsync = async (app) => {
       limit,
       offset,
     });
-    const start = historyStart(app.db);
+    const start = readHistoryStartLedger(app.db);
     return {
       data: rows.map((row) => tradeFromRow(row)),
       meta: {

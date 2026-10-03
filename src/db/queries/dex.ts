@@ -19,10 +19,10 @@ function pairParams(pair: PairKey): Record<string, string | number | null> {
   };
 }
 
-export function insertDexTrade(db: SqliteDatabase, row: Omit<DexTradeRow, 'id'>): void {
-  db.prepare(
+export function insertDexTrade(db: SqliteDatabase, row: Omit<DexTradeRow, 'id'>): boolean {
+  const result = db.prepare(
     `
-    INSERT INTO dex_trades (
+    INSERT OR IGNORE INTO dex_trades (
       base_currency, base_issuer, counter_currency, counter_issuer, price,
       base_amount, counter_amount, taker, maker, ledger_index, close_time, tx_hash
     ) VALUES (
@@ -31,6 +31,7 @@ export function insertDexTrade(db: SqliteDatabase, row: Omit<DexTradeRow, 'id'>)
     )
     `,
   ).run(row);
+  return result.changes > 0;
 }
 
 export function listDexTrades(

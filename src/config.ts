@@ -9,6 +9,10 @@ export interface Config {
   apiPort: number;
   apiHost: string;
   logLevel: LogLevel;
+  /** Absolute ledger to start historical backfill, or null to skip. `1` is genesis. */
+  backfillFromLedger: number | null;
+  /** If `backfillFromLedger` is unset, start at `snapshot - lookback + 1`. */
+  backfillLookback: number | null;
 }
 
 export class ConfigError extends Error {
@@ -60,6 +64,47 @@ function readWebsocketUrl(env: NodeJS.ProcessEnv): string {
   return url;
 }
 
+function readOptionalPositiveInt(env: NodeJS.ProcessEnv, key: string): number | null {
+  const raw = env[key];
+  if (raw === undefined || raw.trim() === '') {
+    return null;
+  }
+  const value = Number.parseInt(raw.trim(), 10);
+  if (!Number.isInteger(value) || value < 1) {
+    throw new ConfigError(`${key} must be an integer >= 1`);
+  }
+  return value;
+}
+
+function readBackfillFromLedger(env: NodeJS.ProcessEnv): number | null {
+  const raw = env.BACKFILL_FROM_LEDGER ?? env.FULL_HISTORY_START;
+  if (raw === undefined || raw.trim() === '') {
+    return null;
+  }
+  const trimmed = raw.trim().toLowerCase();
+  if (trimmed === 'genesis' || trimmed === 'start') {
+    return 1;
+  }
+  const value = Number.parseInt(trimmed, 10);
+  if (!Number.isInteger(value) || value < 1) {
+    throw new ConfigError('BACKFILL_FROM_LEDGER must be an integer >= 1, or "genesis"');
+  }
+  return value;
+}
+
+export function resolveBackfillFrom(config: Config, snapshotLedger: number): number | null {
+  if (!Number.isInteger(snapshotLedger) || snapshotLedger < 1) {
+    return null;
+  }
+  if (config.backfillFromLedger !== null) {
+    return Math.min(snapshotLedger, config.backfillFromLedger);
+  }
+  if (config.backfillLookback !== null) {
+    return Math.max(1, snapshotLedger - config.backfillLookback + 1);
+  }
+  return null;
+}
+
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
   return {
     xahaudUrl: readWebsocketUrl(env),
@@ -67,6 +112,8 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     apiPort: readPort(env, 'API_PORT', 3000),
     apiHost: readString(env, 'API_HOST', '0.0.0.0'),
     logLevel: readLogLevel(env),
+    backfillFromLedger: readBackfillFromLedger(env),
+    backfillLookback: readOptionalPositiveInt(env, 'BACKFILL_LOOKBACK'),
   };
 }
 

@@ -15,6 +15,13 @@ export const StatusSchema = Type.Object({
   ]),
   snapshot_ledger: Type.Union([Type.Integer(), Type.Null()]),
   history_start_ledger: Type.Union([Type.Integer(), Type.Null()]),
+  backfill_status: Type.Union([
+    Type.Literal('idle'),
+    Type.Literal('running'),
+    Type.Literal('complete'),
+  ]),
+  backfill_from: Type.Union([Type.Integer(), Type.Null()]),
+  backfill_ledger: Type.Union([Type.Integer(), Type.Null()]),
   ledger_index: Type.Integer(),
   network_ledger_index: Type.Union([Type.Integer(), Type.Null()]),
   lag_ledgers: Type.Union([Type.Integer(), Type.Null()]),

@@ -190,9 +190,12 @@ export function applyExecutedOffers(
   log: ApplyLogger,
 ): Array<Omit<DexTradeRow, 'id'>> {
   const trades = extractExecutedTrades(tx, nodes, ledgerIndex, closeTime, log);
+  const inserted: Array<Omit<DexTradeRow, 'id'>> = [];
   for (const trade of trades) {
-    insertDexTrade(db, trade);
-    applyTradeToCandles(db, trade);
+    if (insertDexTrade(db, trade)) {
+      applyTradeToCandles(db, trade);
+      inserted.push(trade);
+    }
   }
-  return trades;
+  return inserted;
 }

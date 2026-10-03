@@ -78,6 +78,32 @@ describe('catchUpLedgers', () => {
     assert.ok(results.every((row) => row.applied));
     assert.equal(getLatestLedgerIndex(db), 13);
   });
+
+  it('does not rewind live when historical ledgers sit below the snapshot', async () => {
+    const db = memoryDb();
+    seedLiveFrom(db, 10);
+    upsertLedger(db, {
+      ledger_index: 8,
+      close_time: 1_700_000_008,
+      hash: '8'.repeat(64),
+      tx_count: 0,
+      indexed_at: 1_700_000_008,
+    });
+    const requested: number[] = [];
+    await catchUpLedgers({
+      db,
+      source: {
+        getLedgerWithTransactions: async (index) => {
+          requested.push(index);
+          return emptyLedger(index);
+        },
+      },
+      log: silentLog,
+      through: 12,
+    });
+    assert.deepEqual(requested, [11, 12]);
+    assert.equal(getLatestLedgerIndex(db), 12);
+  });
 });
 
 describe('followLive', () => {

@@ -76,7 +76,7 @@ export function insertUriTokenTransfer(
 ): void {
   db.prepare(
     `
-    INSERT INTO uri_token_transfers (
+    INSERT OR IGNORE INTO uri_token_transfers (
       uri_token_id, from_account, to_account, price, ledger_index, tx_hash
     ) VALUES (
       @uri_token_id, @from_account, @to_account, @price, @ledger_index, @tx_hash

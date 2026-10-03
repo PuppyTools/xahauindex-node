@@ -14,7 +14,8 @@ XahauIndex connects to a xahaud node, snapshots the current ledger, follows it i
 - **IOU tokens** — trust lines, holders, issuer metadata, supply, remarks
 - **URITokens** — Xahau native NFTs; mint / sell / transfer / burn plus Remarks
 - **Issuer profiles** — domain verification via `xrp-ledger.toml`, blackhole detection, AccountRoot remarks
-- **DEX prices** — historical OHLCV (`1h` / `24h` / `7d`) and a trade tape, filterable by time or ledger range
+- **DEX prices** — OHLCV (`1h` / `24h` / `7d`) and a trade tape, filterable by time or ledger range
+- **Optional history backfill** — walk closed ledgers back from the snapshot (genesis or a lookback) for trades and URIToken transfers without rewriting current balances
 - **Hook activity** — which accounts have Hooks installed and which hashes
 - **Real-time WebSocket** — token, URIToken, price, and hook streams
 - **Docker-first** — `docker compose up`
@@ -56,9 +57,20 @@ DB_PATH=./data/xahauindex.db
 API_PORT=3000
 API_HOST=0.0.0.0
 LOG_LEVEL=info
+# BACKFILL_FROM_LEDGER=genesis
+# BACKFILL_LOOKBACK=10000
 ```
 
 Default network is **Xahau mainnet**. A public WebSocket is fine for development; a local xahaud is better for snapshot speed.
+
+Historical backfill is **off** unless you set one of:
+
+| Variable | Meaning |
+|----------|---------|
+| `BACKFILL_FROM_LEDGER` | Absolute start ledger. `genesis` / `start` = `1`. Alias: `FULL_HISTORY_START`. |
+| `BACKFILL_LOOKBACK` | Start at `snapshot_ledger - LOOKBACK + 1` when `FROM` is unset. |
+
+If both are set, `BACKFILL_FROM_LEDGER` wins. Public nodes often cannot serve very old ledgers; those indexes are retried, then skipped. The snapshot remains the source of current balances, owners, issuers, and Hooks. Backfill records DEX trades and URIToken transfers only.
 
 ---
 
@@ -130,8 +142,8 @@ See [`docs/architecture.md`](docs/architecture.md) and [`docs/implementation-pla
 
 ## Roadmap
 
-- **v1.0** — snapshot + live, IOUs, URITokens, remarks, issuers, DEX candles/trades, Hooks, REST + WS, Docker
-- **v1.1** — optional historical trade/tx backfill, auth/rate limiting
+- **v1.0** — snapshot + live, IOUs, URITokens, remarks, issuers, DEX candles/trades, Hooks, REST + WS, Docker, optional historical backfill
+- **v1.1** — auth/rate limiting
 - **v2.0** — public hosted instance, client SDK
 - **v3.0** — Governance Game, bridge tracking
 

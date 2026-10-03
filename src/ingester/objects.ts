@@ -513,6 +513,66 @@ export function applyAffectedLedgerNode(
   return null;
 }
 
+export type UriTokenLiveEvent = 'mint' | 'burn' | 'transfer' | 'update';
+
+export function applyHistoricalUriToken(
+  db: SqliteDatabase,
+  node: ParsedAffectedNode,
+  ledger: number,
+  log: ApplyLogger,
+  snapshotLedger: number,
+  createdIds: Set<string>,
+  transfer?: { txHash: string; price: string | null },
+): UriTokenLiveEvent | null {
+  const raw = { LedgerEntryType: 'URIToken', index: node.index, ...node.fields };
+  const uriToken = parseUriToken(raw);
+  if (!uriToken) {
+    log.warn({ index: node.index, kind: node.kind }, 'skipping malformed historical URIToken');
+    return null;
+  }
+  const existing = getUriToken(db, node.index);
+  const protectCurrent =
+    existing !== undefined &&
+    snapshotLedger >= 1 &&
+    existing.last_updated >= snapshotLedger &&
+    !createdIds.has(node.index);
+  if (node.kind === 'deleted') {
+    if (protectCurrent) {
+      return 'update';
+    }
+    applyDeletedUriToken(db, uriToken, ledger, log);
+    return 'burn';
+  }
+  if (protectCurrent) {
+    const previousOwner =
+      node.previous !== undefined && typeof node.previous.Owner === 'string'
+        ? node.previous.Owner
+        : undefined;
+    const ownerChanged = previousOwner !== undefined && previousOwner !== uriToken.Owner;
+    if (ownerChanged && transfer && transfer.txHash !== '') {
+      insertUriTokenTransfer(db, {
+        uri_token_id: node.index,
+        from_account: previousOwner,
+        to_account: uriToken.Owner,
+        price: transfer.price,
+        ledger_index: ledger,
+        tx_hash: transfer.txHash,
+      });
+      return 'transfer';
+    }
+    return 'update';
+  }
+  applyUriTokenFields(db, uriToken, ledger, log, {
+    fields: node.fields,
+    ...(node.previous === undefined ? {} : { previous: node.previous }),
+    ...(transfer === undefined ? {} : { transfer }),
+  });
+  if (existing === undefined) {
+    createdIds.add(node.index);
+  }
+  return node.kind === 'created' ? 'mint' : 'update';
+}
+
 export function resolveRemarkTarget(
   db: SqliteDatabase,
   objectId: string,

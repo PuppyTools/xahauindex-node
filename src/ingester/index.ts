@@ -3,6 +3,7 @@ import type { EventHub } from '../api/hub.js';
 import type { Config } from '../config.js';
 import type { SqliteDatabase } from '../db/client.js';
 import type { Runtime } from '../runtime.js';
+import { runBackfill } from './backfill.js';
 import { followLive, type LiveLogger } from './live.js';
 import { runSnapshot } from './snapshot.js';
 import { createXahauSource } from './source.js';
@@ -56,7 +57,14 @@ export async function startIngester(options: {
       log: options.log,
       ...(options.signal === undefined ? {} : { signal: options.signal }),
     });
-    await Promise.all([live, toml]);
+    const backfill = runBackfill({
+      db: options.db,
+      source,
+      config: options.config,
+      log: options.log,
+      ...(options.signal === undefined ? {} : { signal: options.signal }),
+    });
+    await Promise.all([live, toml, backfill]);
   } finally {
     await source.disconnect();
   }

@@ -41,8 +41,9 @@ XahauIndex has three layers: an **ingester** (snapshot + live WebSocket), a **SQ
 2. Connect `@transia/xrpl` `Client` to `XAHAUD_URL` (default mainnet).
 3. If `indexer_state.snapshot_status` is not `complete`, run the snapshot.
 4. Start the TOML worker.
-5. Subscribe to `ledger` and `transactions`. Ignore ledgers `<= snapshot_ledger`.
-6. Listen on `API_HOST:API_PORT`. No auth.
+5. If `BACKFILL_FROM_LEDGER` or `BACKFILL_LOOKBACK` is set, walk closed ledgers `FROM..L` in history mode (DEX trades + URIToken transfers only). Resume via `backfill_next`. Missing historical ledgers are retried, then skipped.
+6. Subscribe to `ledger`. Ignore live apply at or before `snapshot_ledger`. Live starts at `max(MAX(ledgers)+1, live_from_ledger)` and never below `L+1`.
+7. Listen on `API_HOST:API_PORT`. No auth.
 
 ### Snapshot
 
@@ -68,6 +69,17 @@ Objects consumed during snapshot:
 - Process only validated `tesSUCCESS` transactions.
 - One SQLite transaction per ledger.
 - TOML HTTP is **never** inside that transaction.
+
+### Historical backfill
+
+Optional. After snapshot, if `BACKFILL_FROM_LEDGER` (alias `FULL_HISTORY_START`; `genesis`/`start` → `1`) or `BACKFILL_LOOKBACK` is set, walk `FROM..snapshot_ledger` inclusive.
+
+- `FROM` wins when both are set. Neither set = no backfill.
+- History mode writes DEX trades (idempotent) and URIToken transfers. If the URIToken already exists from the snapshot, owner/offer/burn are left alone.
+- Missing tokens get a full apply, then a burn when the node is a `DeletedNode`.
+- RippleState, AccountRoot, SetRemarks, and SetHook are not applied.
+- Public nodes that cannot serve an old ledger: retry, then skip and persist `backfill_next`.
+- Runs in parallel with live follow. Historical rows below `L` do not move `MAX(ledgers)` past the snapshot.
 
 ---
 
@@ -123,7 +135,7 @@ Price is **counter per base**. Pair sides are stored in lexicographic `(currency
 
 `PriceSummary.change_24h` / `volume_24h` are derived at read time, not stored as rolling rows.
 
-History begins at `live_from_ledger`. Range filters apply to whatever the node has collected.
+History begins at `backfill_from` when a backfill is configured, otherwise `live_from_ledger`. Range filters apply to whatever the node has collected. Historical apply never rewrites snapshot token balances.
 
 ---
 
@@ -140,7 +152,7 @@ CREATE TABLE indexer_state (
 );
 ```
 
-Keys: `snapshot_status`, `snapshot_ledger`, `snapshot_marker`, `live_from_ledger`, `network_id`.
+Keys: `snapshot_status`, `snapshot_ledger`, `snapshot_marker`, `live_from_ledger`, `backfill_status`, `backfill_from`, `backfill_through`, `backfill_next`, `backfill_ledger`, `network_id`.
 
 ### `ledgers`
 
@@ -400,7 +412,7 @@ Streams: `tokens`, `uritokens`, `prices`, `hooks`.
 
 ## Key design decisions
 
-**Why a snapshot instead of live-only?** Wallets, explorers, and DEX UIs need current holder/supply/ownership/hook state. Live-only is empty until objects move. Snapshot is current state, not genesis backfill.
+**Why a snapshot instead of live-only?** Wallets, explorers, and DEX UIs need current holder/supply/ownership/hook state. Live-only is empty until objects move. Snapshot is the current-state gate; optional backfill adds historical trades and URIToken transfers without touching those balances.
 
 **Why SQLite?** Zero-dependency self-hosting. Xahau throughput fits a single-writer file. Postgres can wait for v3.
 

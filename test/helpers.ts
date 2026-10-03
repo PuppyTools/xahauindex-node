@@ -9,6 +9,8 @@ export function testConfig(overrides: Partial<Config> = {}): Config {
     apiPort: 3000,
     apiHost: '127.0.0.1',
     logLevel: 'error',
+    backfillFromLedger: null,
+    backfillLookback: null,
     ...overrides,
   };
 }

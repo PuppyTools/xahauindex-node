@@ -19,6 +19,7 @@ export interface ApiErrorBody {
 }
 
 export type SnapshotStatus = 'pending' | 'running' | 'complete';
+export type BackfillStatus = 'idle' | 'running' | 'complete';
 export type IndexerHealth = 'syncing' | 'live' | 'degraded';
 
 export interface Status {
@@ -26,6 +27,9 @@ export interface Status {
   snapshot_status: SnapshotStatus;
   snapshot_ledger: number | null;
   history_start_ledger: number | null;
+  backfill_status: BackfillStatus;
+  backfill_from: number | null;
+  backfill_ledger: number | null;
   ledger_index: number;
   network_ledger_index: number | null;
   lag_ledgers: number | null;

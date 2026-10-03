@@ -69,7 +69,39 @@ describe('GET /v1/status', () => {
     assert.equal(body.data.token_count, 1);
     assert.equal(body.data.issuer_count, 1);
     assert.equal(body.data.history_start_ledger, 101);
+    assert.equal(body.data.backfill_status, 'idle');
+    assert.equal(body.data.backfill_from, null);
+    assert.equal(body.data.backfill_ledger, null);
 
+    await app.close();
+  });
+
+  it('reports backfill progress and uses it as history_start_ledger', async () => {
+    const db = openDatabase(':memory:');
+    dbs.push(db);
+    setIndexerState(db, 'snapshot_status', 'complete');
+    setIndexerState(db, 'snapshot_ledger', '100');
+    setIndexerState(db, 'live_from_ledger', '101');
+    setIndexerState(db, 'backfill_status', 'running');
+    setIndexerState(db, 'backfill_from', '40');
+    setIndexerState(db, 'backfill_ledger', '55');
+    db.prepare(
+      'INSERT INTO ledgers (ledger_index, close_time, hash, tx_count, indexed_at) VALUES (?, ?, ?, ?, ?)',
+    ).run(100, 1_700_000_000, 'A'.repeat(64), 0, 1_700_000_001);
+
+    const app = await buildApi({
+      db,
+      config: testConfig(),
+      runtime: testRuntime({ networkLedgerIndex: 102 }),
+    });
+    const response = await app.inject({ method: 'GET', url: '/v1/status' });
+    const body = response.json() as { data: Status };
+    assert.equal(response.statusCode, 200);
+    assert.equal(body.data.status, 'live');
+    assert.equal(body.data.history_start_ledger, 40);
+    assert.equal(body.data.backfill_status, 'running');
+    assert.equal(body.data.backfill_from, 40);
+    assert.equal(body.data.backfill_ledger, 55);
     await app.close();
   });
 

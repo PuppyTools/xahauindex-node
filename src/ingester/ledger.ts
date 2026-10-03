@@ -7,12 +7,14 @@ import { applyExecutedOffers } from './dex.js';
 import { parseAffectedNode, parseLedgerTx } from './guards.js';
 import {
   applyAffectedLedgerNode,
+  applyHistoricalUriToken,
   applySetRemarks,
   type ApplyLogger,
+  type UriTokenLiveEvent,
 } from './objects.js';
 import type { ClosedLedger } from './source.js';
 
-export type UriTokenLiveEvent = 'mint' | 'burn' | 'transfer' | 'update';
+export type { UriTokenLiveEvent };
 
 export interface ApplyClosedLedgerResult {
   applied: boolean;
@@ -149,6 +151,77 @@ export function applyClosedLedger(
       tokenIds: [...touched],
       uriTokenEvents,
       hookAccounts: [...hookAccounts],
+      trades,
+    };
+  });
+  return apply();
+}
+
+export function applyHistoricalLedger(
+  db: SqliteDatabase,
+  ledger: ClosedLedger,
+  log: ApplyLogger,
+): ApplyClosedLedgerResult {
+  const apply = db.transaction((): ApplyClosedLedgerResult => {
+    const uriTokenEvents: ApplyClosedLedgerResult['uriTokenEvents'] = [];
+    const trades: ApplyClosedLedgerResult['trades'] = [];
+    const createdIds = new Set<string>();
+    const snapshot = snapshotLedgerBound(db);
+    let txApplied = 0;
+    for (const raw of ledger.transactions) {
+      const tx = parseLedgerTx(raw);
+      if (!tx || tx.result !== 'tesSUCCESS') {
+        continue;
+      }
+      txApplied += 1;
+      const transfer =
+        tx.hash === ''
+          ? undefined
+          : {
+              txHash: tx.hash,
+              price: serializeAmount(tx.amount),
+            };
+      const nodes = [];
+      for (const rawNode of tx.affectedNodes) {
+        const node = parseAffectedNode(rawNode);
+        if (!node) {
+          continue;
+        }
+        nodes.push(node);
+        if (node.type !== 'URIToken') {
+          continue;
+        }
+        const event = applyHistoricalUriToken(
+          db,
+          node,
+          ledger.index,
+          log,
+          snapshot,
+          createdIds,
+          transfer,
+        );
+        if (event) {
+          uriTokenEvents.push({ id: node.index, event });
+        }
+      }
+      trades.push(...applyExecutedOffers(db, tx, nodes, ledger.index, ledger.closeTime, log));
+    }
+    upsertLedger(db, {
+      ledger_index: ledger.index,
+      close_time: ledger.closeTime,
+      hash: ledger.hash === '' ? '0'.repeat(64) : ledger.hash,
+      tx_count: ledger.transactions.length,
+      indexed_at: Math.floor(Date.now() / 1000),
+    });
+    return {
+      applied: true,
+      skipped: false,
+      index: ledger.index,
+      txApplied,
+      tokensTouched: 0,
+      tokenIds: [],
+      uriTokenEvents,
+      hookAccounts: [],
       trades,
     };
   });

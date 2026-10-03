@@ -52,6 +52,7 @@ src/
   ingester/
     index.ts        — WebSocket lifecycle manager
     snapshot.ts     — ledger_data walk + resume
+    backfill.ts     — optional historical tx walk (trades + URIToken transfers)
     ledger.ts       — ledger_closed handler, orchestrates batch processing
     tokens.ts       — IOU trust-line ingestion
     uritokens.ts    — URIToken lifecycle
@@ -131,6 +132,8 @@ Copy `.env.example` to `.env`. Never commit `.env`.
 - `DB_PATH` — default `./data/xahauindex.db`
 - `API_PORT` / `API_HOST` — default `3000` / `0.0.0.0`
 - `LOG_LEVEL` — `trace|debug|info|warn|error`
+- `BACKFILL_FROM_LEDGER` — optional absolute start (`genesis`/`start` = `1`). Alias: `FULL_HISTORY_START`.
+- `BACKFILL_LOOKBACK` — if `FROM` is unset, start at `snapshot - lookback + 1`. Neither set = no backfill.
 
 ## Running locally
 
@@ -152,9 +155,11 @@ Data persists in `xahauindex_data`. SQLite at `/data/xahauindex.db` inside the c
 
 ## v1 scope
 
-In: current-ledger snapshot · live ingest · IOU tokens · URITokens · remarks (URIToken / issuer / trust line) · issuer TOML · DEX historical OHLCV + trades · Hooks · REST + WS · Docker · no API key
+In: current-ledger snapshot · live ingest · optional historical backfill (env-bounded) · IOU tokens · URITokens · remarks (URIToken / issuer / trust line) · issuer TOML · DEX historical OHLCV + trades · Hooks · REST + WS · Docker · no API key
 
-Out: genesis tx backfill · auth/rate limiting · Governance Game · multi-node federation · off-ledger metadata scrape
+Out: auth/rate limiting · Governance Game · multi-node federation · off-ledger metadata scrape
+
+History mode must not overwrite snapshot balances, owners, issuers, or Hooks. It records DEX trades and URIToken transfers only.
 
 ---
 
