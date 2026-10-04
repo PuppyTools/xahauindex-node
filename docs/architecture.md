@@ -252,8 +252,11 @@ CREATE TABLE uri_tokens (
   destination   TEXT,
   burned        INTEGER NOT NULL DEFAULT 0,
   burn_ledger   INTEGER,
-  mint_ledger   INTEGER NOT NULL,
-  last_updated  INTEGER NOT NULL
+  mint_ledger              INTEGER NOT NULL,
+  last_updated             INTEGER NOT NULL,
+  icon_url                 TEXT,
+  uri_metadata             TEXT,
+  uri_meta_checked_ledger  INTEGER
 );
 CREATE INDEX uri_tokens_issuer ON uri_tokens(issuer);
 CREATE INDEX uri_tokens_owner ON uri_tokens(owner);
