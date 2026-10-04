@@ -148,6 +148,8 @@ npm run build
 npm test
 ```
 
+`allowScripts` in `package.json` permits `better-sqlite3` and `esbuild` install scripts (npm 11.16+ / 12).
+
 ## Docker
 
 ```bash
