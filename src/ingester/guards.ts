@@ -3,7 +3,9 @@ import type {
   AffectedNode,
   Amount,
   HookEntry,
+  HookDefinitionObject,
   HookObject,
+  HookParameter,
   IssuedAmount,
   LedgerRemark,
   RippleStateObject,
@@ -152,6 +154,63 @@ export function parseAccountRoot(value: unknown): AccountRootObject | undefined 
     ...(remarks === undefined ? {} : { Remarks: remarks }),
     ...(previousTxnLgrSeq === undefined ? {} : { PreviousTxnLgrSeq: previousTxnLgrSeq }),
     ...(hookStateCount === undefined ? {} : { HookStateCount: hookStateCount }),
+  };
+}
+
+export function parseHookDefinition(value: unknown): HookDefinitionObject | undefined {
+  if (!isRecord(value) || value.LedgerEntryType !== 'HookDefinition') {
+    return undefined;
+  }
+  const hookHash = asString(value.HookHash);
+  if (!hookHash) {
+    return undefined;
+  }
+  const index = asString(value.index);
+  const hookNamespace = asString(value.HookNamespace);
+  const hookOn = asString(value.HookOn);
+  const hookOnIncoming = asString(value.HookOnIncoming);
+  const hookOnOutgoing = asString(value.HookOnOutgoing);
+  const hookCanEmit = asString(value.HookCanEmit);
+  const hookName = asString(value.HookName);
+  const hookApiVersion = asNumber(value.HookApiVersion);
+  const createCode = asString(value.CreateCode);
+  const hookSetTxnId = asString(value.HookSetTxnID);
+  const fee =
+    asString(value.Fee) ??
+    (typeof value.Fee === 'number' && Number.isFinite(value.Fee) ? String(value.Fee) : undefined);
+  const hookCallbackFee =
+    asString(value.HookCallbackFee) ??
+    (typeof value.HookCallbackFee === 'number' && Number.isFinite(value.HookCallbackFee)
+      ? String(value.HookCallbackFee)
+      : undefined);
+  const flags = asNumber(value.Flags);
+  const referenceCount =
+    typeof value.ReferenceCount === 'string' || typeof value.ReferenceCount === 'number'
+      ? value.ReferenceCount
+      : undefined;
+  const parameters = Array.isArray(value.HookParameters)
+    ? (value.HookParameters as HookParameter[])
+    : isRecord(value.HookParameters)
+      ? (value.HookParameters as HookParameter)
+      : undefined;
+  return {
+    LedgerEntryType: 'HookDefinition',
+    HookHash: hookHash,
+    ...(index === undefined ? {} : { index }),
+    ...(hookNamespace === undefined ? {} : { HookNamespace: hookNamespace }),
+    ...(hookOn === undefined ? {} : { HookOn: hookOn }),
+    ...(hookOnIncoming === undefined ? {} : { HookOnIncoming: hookOnIncoming }),
+    ...(hookOnOutgoing === undefined ? {} : { HookOnOutgoing: hookOnOutgoing }),
+    ...(hookCanEmit === undefined ? {} : { HookCanEmit: hookCanEmit }),
+    ...(hookName === undefined ? {} : { HookName: hookName }),
+    ...(hookApiVersion === undefined ? {} : { HookApiVersion: hookApiVersion }),
+    ...(parameters === undefined ? {} : { HookParameters: parameters }),
+    ...(createCode === undefined ? {} : { CreateCode: createCode }),
+    ...(hookSetTxnId === undefined ? {} : { HookSetTxnID: hookSetTxnId }),
+    ...(referenceCount === undefined ? {} : { ReferenceCount: referenceCount }),
+    ...(fee === undefined ? {} : { Fee: fee }),
+    ...(hookCallbackFee === undefined ? {} : { HookCallbackFee: hookCallbackFee }),
+    ...(flags === undefined ? {} : { Flags: flags }),
   };
 }
 

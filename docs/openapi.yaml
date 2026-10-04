@@ -502,6 +502,94 @@ components:
         tx_hash:
           type: string
 
+    HookTriggerMask:
+      type: object
+      required: [raw, mode, types]
+      properties:
+        raw:
+          type: string
+        mode:
+          type: string
+          enum: [all_except, only, none]
+        types:
+          type: array
+          items:
+            type: string
+
+    HookDefinition:
+      type: object
+      required: [hook_hash, code_size]
+      properties:
+        hook_hash:
+          type: string
+        hook_namespace:
+          type: string
+          nullable: true
+        hook_on:
+          type: string
+          nullable: true
+        hook_on_incoming:
+          type: string
+          nullable: true
+        hook_on_outgoing:
+          type: string
+          nullable: true
+        hook_can_emit:
+          type: string
+          nullable: true
+        hook_name:
+          type: string
+          nullable: true
+        hook_api_version:
+          type: integer
+          nullable: true
+        parameters:
+          type: array
+          items:
+            type: object
+            properties:
+              name:
+                type: string
+              value:
+                type: string
+        reference_count:
+          type: integer
+          nullable: true
+        code_size:
+          type: integer
+        hook_fee:
+          type: string
+          nullable: true
+        hook_callback_fee:
+          type: string
+          nullable: true
+        hook_set_txn_id:
+          type: string
+          nullable: true
+        flags:
+          type: integer
+          nullable: true
+        triggers:
+          nullable: true
+          allOf:
+            - $ref: '#/components/schemas/HookTriggerMask'
+        triggers_incoming:
+          nullable: true
+          allOf:
+            - $ref: '#/components/schemas/HookTriggerMask'
+        triggers_outgoing:
+          nullable: true
+          allOf:
+            - $ref: '#/components/schemas/HookTriggerMask'
+        can_emit:
+          nullable: true
+          allOf:
+            - $ref: '#/components/schemas/HookTriggerMask'
+        first_ledger:
+          type: integer
+        last_updated:
+          type: integer
+
     HookState:
       type: object
       required: [account, hook_count, hooks]
@@ -525,6 +613,9 @@ components:
                 type: string
                 nullable: true
               hook_on_outgoing:
+                type: string
+                nullable: true
+              hook_can_emit:
                 type: string
                 nullable: true
               hook_namespace:
@@ -554,6 +645,14 @@ components:
                       type: string
                     hook_hash:
                       type: string
+              triggers:
+                nullable: true
+                allOf:
+                  - $ref: '#/components/schemas/HookTriggerMask'
+              definition:
+                nullable: true
+                allOf:
+                  - $ref: '#/components/schemas/HookDefinition'
         first_ledger:
           type: integer
         last_updated:
@@ -980,6 +1079,59 @@ paths:
                     $ref: '#/components/schemas/Meta'
         '404':
           description: Pair not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /v1/hooks/definitions:
+    get:
+      operationId: listHookDefinitions
+      tags: [hooks]
+      summary: List indexed HookDefinition objects
+      parameters:
+        - $ref: '#/components/parameters/page'
+        - $ref: '#/components/parameters/per_page'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/HookDefinition'
+                  meta:
+                    $ref: '#/components/schemas/Meta'
+
+  /v1/hooks/definitions/{hook_hash}:
+    get:
+      operationId: getHookDefinition
+      tags: [hooks]
+      summary: One HookDefinition by hash
+      parameters:
+        - name: hook_hash
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/HookDefinition'
+                  meta:
+                    $ref: '#/components/schemas/Meta'
+        '404':
+          description: Hook definition not indexed
           content:
             application/json:
               schema:

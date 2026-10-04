@@ -27,6 +27,16 @@ export function hookFieldsOf(entry: unknown): HookFields | undefined {
   return undefined;
 }
 
+export function parametersFromUnknown(value: unknown): HookParameter[] {
+  if (Array.isArray(value)) {
+    return parametersOf({ HookParameters: value as LedgerHookParameter[] });
+  }
+  if (isRecord(value) && isRecord(value.HookParameter)) {
+    return parametersOf({ HookParameters: [value as LedgerHookParameter] });
+  }
+  return [];
+}
+
 function parametersOf(fields: HookFields): HookParameter[] {
   const raw = fields.HookParameters ?? [];
   const out: HookParameter[] = [];
@@ -67,6 +77,7 @@ export function normalizeHookEntries(entries: readonly unknown[]): ApiHookEntry[
       hook_on: fields.HookOn ?? null,
       hook_on_incoming: fields.HookOnIncoming ?? null,
       hook_on_outgoing: fields.HookOnOutgoing ?? null,
+      hook_can_emit: fields.HookCanEmit ?? null,
       hook_namespace: fields.HookNamespace ?? null,
       hook_name: hookName ?? null,
       hook_api_version: fields.HookApiVersion ?? null,

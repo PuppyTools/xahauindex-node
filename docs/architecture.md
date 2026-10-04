@@ -16,7 +16,7 @@ XahauIndex has three layers: an **ingester** (snapshot + live WebSocket), a **SQ
 │  ledger.ts     — one SQLite transaction per closed ledger        │
 │  tokens.ts     — RippleState / TrustSet / IOU Payment            │
 │  uritokens.ts  — URIToken mint/burn/offer/buy                    │
-│  hooks.ts      — Hook ledger object (Account + Hooks array)      │
+│  hooks.ts      — Hook install + HookDefinition metadata          │
 │  remarks.ts    — Remarks decode + SetRemarks                     │
 │  issuers.ts    — AccountRoot + TOML (async worker)               │
 │  dex.ts        — executed offers → trades + calendar candles     │
@@ -63,6 +63,7 @@ Objects consumed during snapshot:
 | `URIToken` | `uri_tokens`, remarks |
 | `AccountRoot` | `issuers` (Domain / flags / later issuer), remarks |
 | `Hook` | `hook_accounts`, `issuers.has_hooks` |
+| `HookDefinition` | `hook_definitions` (hash, defaults, `code_size` — not WASM) |
 
 ### Live stream
 
@@ -118,7 +119,7 @@ Well-known keys (`name`, `description`, `image`, `icon`, `website`, `attributes`
 
 ### Hooks
 
-Installed hooks are a `Hook` ledger object ([Xahau Hook](https://xahau.network/docs/protocol-reference/ledger-data/ledger-objects-types/hook/)): `Account` plus a `Hooks` array of `{ Hook: { HookHash, … } }` slots. Snapshot indexes those objects from `ledger_data`. Live `SetHook` creates / replaces / deletes the same object. `AccountRoot` does not carry the hook array. Persist HookOn v1 and v2 fields when present. Empty slots are dropped.
+Installed hooks are a `Hook` ledger object ([Xahau Hook](https://xahau.network/docs/protocol-reference/ledger-data/ledger-objects-types/hook/)): `Account` plus a `Hooks` array of `{ Hook: { HookHash, … } }` slots. The bytecode and defaults live on a reference-counted `HookDefinition` ([docs](https://xahau.network/docs/protocol-reference/ledger-data/ledger-objects-types/hook-definition/)). Snapshot indexes both from `ledger_data`. Live `SetHook` creates / replaces / deletes them. Store `code_size`, not `CreateCode`. `AccountRoot` does not carry the hook array. HookOn bitmasks are decoded to `triggers` (`all_except` / `only` / `none`) at read time. Empty slots are dropped.
 
 ### Issuers + TOML
 
@@ -316,6 +317,30 @@ CREATE TABLE hook_accounts (
   hooks_json    TEXT NOT NULL,
   first_ledger  INTEGER NOT NULL,
   last_updated  INTEGER NOT NULL
+);
+```
+
+### `hook_definitions`
+
+```sql
+CREATE TABLE hook_definitions (
+  hook_hash         TEXT PRIMARY KEY,
+  hook_namespace    TEXT,
+  hook_on           TEXT,
+  hook_on_incoming  TEXT,
+  hook_on_outgoing  TEXT,
+  hook_can_emit     TEXT,
+  hook_name         TEXT,
+  hook_api_version  INTEGER,
+  parameters_json   TEXT NOT NULL DEFAULT '[]',
+  reference_count   INTEGER,
+  code_size         INTEGER NOT NULL DEFAULT 0,
+  hook_fee          TEXT,
+  hook_callback_fee TEXT,
+  hook_set_txn_id   TEXT,
+  flags             INTEGER,
+  first_ledger      INTEGER NOT NULL,
+  last_updated      INTEGER NOT NULL
 );
 ```
 

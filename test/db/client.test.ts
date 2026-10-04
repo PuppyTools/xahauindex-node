@@ -38,6 +38,7 @@ describe('openDatabase', () => {
       'uri_tokens',
       'remarks',
       'hook_accounts',
+      'hook_definitions',
       'dex_trades',
       'ohlcv_candles',
       'schema_migrations',
@@ -55,6 +56,7 @@ describe('openDatabase', () => {
         '004_icon_urls.sql',
         '005_uri_metadata.sql',
         '006_toml_links.sql',
+        '007_hook_definitions.sql',
       ],
     );
   });

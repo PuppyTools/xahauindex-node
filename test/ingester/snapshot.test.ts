@@ -67,15 +67,31 @@ const issuerRoot = {
 
 const hookObject = {
   LedgerEntryType: 'Hook',
-  index: 'B'.repeat(64),
+  index: '9'.repeat(64),
   Account: ISSUER,
   Flags: 0,
   Hooks: [
-    { Hook: { HookHash: HOOK_HASH, HookOn: '0' } },
+    { Hook: { HookHash: HOOK_HASH } },
     { Hook: {} },
     { Hook: {} },
     { Hook: {} },
   ],
+};
+
+const hookDefinition = {
+  LedgerEntryType: 'HookDefinition',
+  index: '8'.repeat(64),
+  HookHash: HOOK_HASH,
+  HookNamespace: '0'.repeat(64),
+  HookOn: '0',
+  HookApiVersion: 0,
+  CreateCode: '0061736D01000000',
+  HookSetTxnID: '7'.repeat(64),
+  ReferenceCount: '3',
+  Fee: '74',
+  HookCallbackFee: '2',
+  HookParameters: [],
+  Flags: 0,
 };
 
 const uriToken = {
@@ -146,7 +162,7 @@ describe('runSnapshot', () => {
     const db = memoryDb();
     const result = await runSnapshot({
       db,
-      source: pagesSource([[rippleState], [issuerRoot, hookObject, uriToken]]),
+      source: pagesSource([[rippleState], [issuerRoot, hookObject, hookDefinition, uriToken]]),
       log: silentLog,
     });
     assert.equal(result.skipped, false);
@@ -186,10 +202,19 @@ describe('runSnapshot', () => {
     assert.equal(nftRes.json().data.remarks.name, 'Cool NFT');
     assert.equal(issuerRes.json().data.domain, 'example.com');
     assert.equal(issuerRes.json().data.has_hooks, true);
+    const defsRes = await app.inject({ method: 'GET', url: '/v1/hooks/definitions' });
+    const defRes = await app.inject({ method: 'GET', url: `/v1/hooks/definitions/${HOOK_HASH}` });
     assert.equal(hooksRes.json().data.length, 1);
     assert.equal(hooksRes.json().data[0].account, ISSUER);
     assert.equal(hooksRes.json().data[0].hook_count, 1);
     assert.equal(hooksRes.json().data[0].hooks[0].hook_hash, HOOK_HASH);
+    assert.equal(hooksRes.json().data[0].hooks[0].triggers.mode, 'all_except');
+    assert.deepEqual(hooksRes.json().data[0].hooks[0].triggers.types, ['SetHook']);
+    assert.equal(hooksRes.json().data[0].hooks[0].definition.code_size, 8);
+    assert.equal(hooksRes.json().data[0].hooks[0].definition.reference_count, 3);
+    assert.equal(defsRes.json().data.length, 1);
+    assert.equal(defRes.json().data.hook_hash, HOOK_HASH);
+    assert.equal(defRes.json().data.code_size, 8);
     await app.close();
   });
 

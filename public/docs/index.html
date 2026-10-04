@@ -551,7 +551,7 @@
 
       <section id="hooks">
         <h3>Hooks</h3>
-        <p class="sub">Accounts that currently own a <code>Hook</code> ledger object. The installed <code>Hooks</code> array (hash, parameters, grants, namespace, HookOn v2) is kept; empty slots are dropped.</p>
+        <p class="sub">Accounts that currently own a <code>Hook</code> ledger object. Each slot includes the install fields plus the shared <code>HookDefinition</code> (code size, default HookOn, namespace, parameters, fees). HookOn bitmasks become <code>triggers</code>. WASM is not stored. Empty slots are dropped.</p>
         <article class="endpoint">
           <header>
             <span class="verb">GET</span>
@@ -565,6 +565,25 @@
                 <tr><td><code>hook_hash</code></td><td><span class="pill opt">query</span></td><td>Only accounts that currently install this hash</td></tr>
               </tbody>
             </table>
+          </div>
+        </article>
+        <article class="endpoint">
+          <header>
+            <span class="verb">GET</span>
+            <span class="path">/v1/hooks/definitions</span>
+            <a class="try" href="/v1/hooks/definitions?per_page=5" target="_blank" rel="noreferrer">Open</a>
+          </header>
+          <div class="body">
+            <p class="sub">Shared HookDefinition catalog. Sorted by how many accounts currently point at the hash.</p>
+          </div>
+        </article>
+        <article class="endpoint">
+          <header>
+            <span class="verb">GET</span>
+            <span class="path">/v1/hooks/definitions/{hook_hash}</span>
+          </header>
+          <div class="body">
+            <p class="sub">404 if that hash is not indexed. <code>code_size</code> is WASM bytes; the bytecode itself is not stored.</p>
           </div>
         </article>
         <article class="endpoint">

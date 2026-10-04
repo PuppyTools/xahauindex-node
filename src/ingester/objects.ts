@@ -1,5 +1,12 @@
 import type { SqliteDatabase } from '../db/client.js';
-import { deleteHookAccount, getHookAccount, upsertHookAccount } from '../db/queries/hooks.js';
+import {
+  deleteHookAccount,
+  deleteHookDefinition,
+  getHookAccount,
+  getHookDefinition,
+  upsertHookAccount,
+  upsertHookDefinition,
+} from '../db/queries/hooks.js';
 import {
   ensureIssuer,
   getIssuer,
@@ -26,11 +33,13 @@ import {
 import type {
   Amount,
   AccountRootObject,
+  HookDefinitionObject,
   HookObject,
   RippleStateObject,
   URITokenObject,
 } from '../types/xahau.js';
 import { normalizeIconUrl } from '../util/icon.js';
+import { hexByteLength } from '../util/hookOn.js';
 import {
   absDecimal,
   decodeCurrency,
@@ -44,12 +53,13 @@ import {
 } from '../util/xahau.js';
 import {
   parseAccountRoot,
+  parseHookDefinition,
   parseHookObject,
   parseRippleState,
   parseUriToken,
   type ParsedAffectedNode,
 } from './guards.js';
-import { normalizeHookEntries } from './hooks.js';
+import { normalizeHookEntries, parametersFromUnknown } from './hooks.js';
 import { parseRemarkArray, remarksToDisplay } from './remarks.js';
 
 export interface ApplyLogger {
@@ -466,6 +476,11 @@ export function applyLedgerObject(
     applyHookObject(db, hook, ledger);
     return;
   }
+  const definition = parseHookDefinition(raw);
+  if (definition) {
+    applyHookDefinition(db, definition, ledger);
+    return;
+  }
   const account = parseAccountRoot(raw);
   if (account) {
     cacheAccountRoot(accountCache, account);
@@ -509,6 +524,19 @@ export function applyAffectedLedgerNode(
       ...(node.previous === undefined ? {} : { previous: node.previous }),
       ...(transfer === undefined ? {} : { transfer }),
     });
+    return null;
+  }
+  if (node.type === 'HookDefinition') {
+    const definition = parseHookDefinition(raw);
+    if (!definition) {
+      log.warn({ index: node.index, kind: node.kind }, 'skipping malformed HookDefinition node');
+      return null;
+    }
+    if (node.kind === 'deleted') {
+      applyDeletedHookDefinition(db, definition);
+      return null;
+    }
+    applyHookDefinition(db, definition, ledger);
     return null;
   }
   if (node.type === 'Hook') {
@@ -563,6 +591,53 @@ export function applyDeletedHookObject(db: SqliteDatabase, object: HookObject, l
   }
   deleteHookAccount(db, object.Account);
   setIssuerHasHooks(db, object.Account, 0, ledger);
+}
+
+function decodeMaybeHex(value: string | undefined): string | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+  const decoded = hexToUtf8(value);
+  return decoded === '' ? value : decoded;
+}
+
+function referenceCountOf(value: string | number | undefined): number | null {
+  if (value === undefined) {
+    return null;
+  }
+  const parsed = typeof value === 'number' ? value : Number.parseInt(value, 10);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+export function applyHookDefinition(
+  db: SqliteDatabase,
+  object: HookDefinitionObject,
+  ledger: number,
+): void {
+  const existing = getHookDefinition(db, object.HookHash.toUpperCase());
+  upsertHookDefinition(db, {
+    hook_hash: object.HookHash.toUpperCase(),
+    hook_namespace: object.HookNamespace ?? null,
+    hook_on: object.HookOn ?? null,
+    hook_on_incoming: object.HookOnIncoming ?? null,
+    hook_on_outgoing: object.HookOnOutgoing ?? null,
+    hook_can_emit: object.HookCanEmit ?? null,
+    hook_name: decodeMaybeHex(object.HookName) ?? null,
+    hook_api_version: object.HookApiVersion ?? null,
+    parameters_json: JSON.stringify(parametersFromUnknown(object.HookParameters)),
+    reference_count: referenceCountOf(object.ReferenceCount),
+    code_size: hexByteLength(object.CreateCode),
+    hook_fee: object.Fee ?? null,
+    hook_callback_fee: object.HookCallbackFee ?? null,
+    hook_set_txn_id: object.HookSetTxnID ?? null,
+    flags: object.Flags ?? null,
+    first_ledger: existing?.first_ledger ?? ledger,
+    last_updated: ledger,
+  });
+}
+
+export function applyDeletedHookDefinition(db: SqliteDatabase, object: HookDefinitionObject): void {
+  deleteHookDefinition(db, object.HookHash.toUpperCase());
 }
 
 export type UriTokenLiveEvent = 'mint' | 'burn' | 'transfer' | 'update';

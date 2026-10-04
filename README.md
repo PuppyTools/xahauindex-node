@@ -120,6 +120,8 @@ Token and pair identifiers use **separate path segments** (no `:` or `+` in one 
 | GET | `/v1/trades/{base}/{counter}` | Executed DEX trades |
 | GET | `/v1/hooks` | Accounts with Hooks |
 | GET | `/v1/hooks/{account}` | Hook state |
+| GET | `/v1/hooks/definitions` | HookDefinition catalog |
+| GET | `/v1/hooks/definitions/{hook_hash}` | One HookDefinition |
 
 ```
 WS /v1/subscribe
@@ -147,7 +149,7 @@ See [`docs/architecture.md`](docs/architecture.md) and [`docs/implementation-pla
 
 **URITokens** are Xahau's native NFT format (not XLS-20). Each has a `URITokenID`, a hex `URI`, and optional Remarks.
 
-**Hooks** are smart contracts attached to accounts. On Xahau they live on a `Hook` ledger object (`Account` + `Hooks` array), not on `AccountRoot`. XahauIndex stores that active array.
+**Hooks** are smart contracts attached to accounts. On Xahau they live on a `Hook` ledger object (`Account` + `Hooks` array), not on `AccountRoot`. The WASM and defaults live on a shared `HookDefinition`. XahauIndex stores the install array plus definition metadata (`code_size`, default HookOn, namespace, parameters, fees) and decodes HookOn into `triggers`. Bytecode is not stored.
 
 **Remarks** are on-ledger `{ name, value }` pairs (hex). v1 indexes them on URITokens, issuer accounts, and issuer-side trust lines.
 

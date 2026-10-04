@@ -116,6 +116,70 @@ describe('SetHook and blackhole', () => {
     await app.close();
   });
 
+  it('indexes HookDefinition metadata and serves it on the install and definition routes', async () => {
+    const db = memoryDb();
+    applyClosedLedger(
+      db,
+      {
+        index: 51,
+        hash: '6'.repeat(64),
+        closeTime: 1_700_000_051,
+        transactions: [
+          {
+            hash: '16'.repeat(32),
+            TransactionType: 'SetHook',
+            Account: ISSUER,
+            meta: {
+              TransactionResult: 'tesSUCCESS',
+              AffectedNodes: [
+                {
+                  CreatedNode: {
+                    LedgerEntryType: 'HookDefinition',
+                    LedgerIndex: '8'.repeat(64),
+                    NewFields: {
+                      HookHash: FIRST_HOOK,
+                      HookOn: 'FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFBFFFFE',
+                      HookNamespace: '0'.repeat(64),
+                      HookApiVersion: 0,
+                      CreateCode: '0061736D01000000',
+                      ReferenceCount: '1',
+                      Fee: '74',
+                    },
+                  },
+                },
+                {
+                  CreatedNode: {
+                    LedgerEntryType: 'Hook',
+                    LedgerIndex: 'd'.repeat(64),
+                    NewFields: {
+                      Account: ISSUER,
+                      Hooks: [{ Hook: { HookHash: FIRST_HOOK } }],
+                    },
+                  },
+                },
+              ],
+            },
+          },
+        ],
+      },
+      silentLog,
+    );
+
+    const app = await buildApi({
+      db,
+      config: testConfig(),
+      runtime: testRuntime({ networkLedgerIndex: 51 }),
+    });
+    const account = await app.inject({ method: 'GET', url: `/v1/hooks/${ISSUER}` });
+    const definition = await app.inject({ method: 'GET', url: `/v1/hooks/definitions/${FIRST_HOOK}` });
+    assert.equal(account.json().data.hooks[0].definition.code_size, 8);
+    assert.equal(account.json().data.hooks[0].triggers.mode, 'only');
+    assert.deepEqual(account.json().data.hooks[0].triggers.types, ['Payment']);
+    assert.equal(definition.json().data.hook_hash, FIRST_HOOK);
+    assert.equal(definition.json().data.hook_fee, '74');
+    await app.close();
+  });
+
   it('ignores empty Hook slots and removes the row when the Hook object is deleted', async () => {
     const db = memoryDb();
     applyClosedLedger(
