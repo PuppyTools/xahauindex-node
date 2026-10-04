@@ -455,7 +455,7 @@ Streams: `tokens`, `uritokens`, `prices`, `hooks`.
 Optional. Off unless `API_RATE_LIMIT_MAX` is a positive integer. Still no API keys.
 
 - Key is `request.ip`. `API_TRUST_PROXY` must stay false on a public bind so clients cannot spoof `X-Forwarded-For`.
-- Same HTTP bucket for REST, `/docs`, OpenAPI, unknown routes, and the WebSocket upgrade.
+- Same HTTP bucket for REST, unknown routes, and the WebSocket upgrade. `/`, `/docs`, `/docs/*`, and `/v1/openapi.yaml` are excluded so browsing the docs page does not consume the quota.
 - Over limit: `429` `{ error: { code: "RATE_LIMITED", message: "Too many requests" } }` plus `Retry-After`.
 - `API_WS_MAX_PER_IP` caps concurrent `/v1/subscribe` sockets per IP (default 8 when the HTTP limiter is on).
 - In-memory only. Ingest / snapshot / xahaud quota are separate.

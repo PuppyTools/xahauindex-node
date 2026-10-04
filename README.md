@@ -92,7 +92,7 @@ Operator rate limiting is **off** unless `API_RATE_LIMIT_MAX` is a positive inte
 | `API_RATE_LIMIT_ALLOW` | Comma-separated IPs / CIDRs that skip the limiter. |
 | `API_WS_MAX_PER_IP` | Concurrent `/v1/subscribe` sockets per IP. Unset = `8` when `MAX` is set, unlimited when `MAX` is off. `0` disables the cap. |
 
-Over the limit the API returns `429` `{ error: { code: "RATE_LIMITED", message: "Too many requests" } }` with `Retry-After`. A public instance can start at `API_RATE_LIMIT_MAX=120`. Docker health checks hit `127.0.0.1`; add that address to `API_RATE_LIMIT_ALLOW` if the max is very low.
+Over the limit the API returns `429` `{ error: { code: "RATE_LIMITED", message: "Too many requests" } }` with `Retry-After`. `/`, `/docs`, `/docs/*`, and `/v1/openapi.yaml` are not counted, so opening the docs page does not burn the quota. A public instance can start at `API_RATE_LIMIT_MAX=120`. Docker health checks hit `127.0.0.1`; add that address to `API_RATE_LIMIT_ALLOW` if the max is very low.
 
 ---
 
