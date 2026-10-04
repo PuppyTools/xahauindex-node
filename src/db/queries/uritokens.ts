@@ -36,10 +36,10 @@ export function upsertUriToken(db: SqliteDatabase, row: UriTokenRow): void {
     `
     INSERT INTO uri_tokens (
       id, uri, uri_raw, digest, issuer, owner, flags, sell_offer, destination,
-      burned, burn_ledger, mint_ledger, last_updated
+      burned, burn_ledger, mint_ledger, last_updated, icon_url, uri_meta_checked_ledger
     ) VALUES (
       @id, @uri, @uri_raw, @digest, @issuer, @owner, @flags, @sell_offer, @destination,
-      @burned, @burn_ledger, @mint_ledger, @last_updated
+      @burned, @burn_ledger, @mint_ledger, @last_updated, @icon_url, @uri_meta_checked_ledger
     )
     ON CONFLICT(id) DO UPDATE SET
       uri = excluded.uri,
@@ -51,9 +51,46 @@ export function upsertUriToken(db: SqliteDatabase, row: UriTokenRow): void {
       destination = excluded.destination,
       burned = excluded.burned,
       burn_ledger = excluded.burn_ledger,
-      last_updated = excluded.last_updated
+      last_updated = excluded.last_updated,
+      icon_url = COALESCE(excluded.icon_url, uri_tokens.icon_url),
+      uri_meta_checked_ledger = COALESCE(excluded.uri_meta_checked_ledger, uri_tokens.uri_meta_checked_ledger)
     `,
   ).run(row);
+}
+
+export function updateUriTokenIcon(db: SqliteDatabase, id: string, iconUrl: string | null): void {
+  db.prepare('UPDATE uri_tokens SET icon_url = @icon_url WHERE id = @id').run({
+    id,
+    icon_url: iconUrl,
+  });
+}
+
+export function markUriTokenMetaChecked(db: SqliteDatabase, id: string, ledger: number): void {
+  db.prepare('UPDATE uri_tokens SET uri_meta_checked_ledger = @ledger WHERE id = @id').run({
+    id,
+    ledger,
+  });
+}
+
+export function listUriTokensDueForMeta(
+  db: SqliteDatabase,
+  ledger: number,
+  interval = 1000,
+  limit = 25,
+): UriTokenRow[] {
+  return db
+    .prepare(
+      `
+      SELECT * FROM uri_tokens
+      WHERE uri IS NOT NULL
+        AND uri != ''
+        AND (icon_url IS NULL OR icon_url = '')
+        AND (uri_meta_checked_ledger IS NULL OR @ledger - uri_meta_checked_ledger >= @interval)
+      ORDER BY mint_ledger DESC
+      LIMIT @limit
+      `,
+    )
+    .all({ ledger, interval, limit }) as UriTokenRow[];
 }
 
 export function markUriTokenBurned(db: SqliteDatabase, id: string, ledger: number): void {

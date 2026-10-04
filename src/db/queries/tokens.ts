@@ -1,4 +1,5 @@
 import type { TokenListFilter, TokenRow, TrustLineRow } from '../../types/db.js';
+import { normalizeIconUrl } from '../../util/icon.js';
 import type { SqliteDatabase } from '../client.js';
 
 import { addDecimal, isZeroDecimal } from '../../util/xahau.js';
@@ -46,9 +47,26 @@ export function updateTokenDisplay(
     id,
     name: fields.name ?? current.name,
     description: fields.description ?? current.description,
-    icon_url: fields.icon_url ?? current.icon_url,
+    icon_url: normalizeIconUrl(fields.icon_url ?? current.icon_url),
     website_url: fields.website_url ?? current.website_url,
   });
+}
+
+export function fillTokenIconsFromIssuer(
+  db: SqliteDatabase,
+  issuer: string,
+  iconUrl: string | null,
+): void {
+  const icon = normalizeIconUrl(iconUrl);
+  if (!icon) {
+    return;
+  }
+  db.prepare(
+    `
+    UPDATE tokens SET icon_url = @icon
+    WHERE issuer = @issuer AND (icon_url IS NULL OR icon_url = '')
+    `,
+  ).run({ issuer, icon });
 }
 
 export function syncTokenIssuerFlags(db: SqliteDatabase, issuer?: string): void {

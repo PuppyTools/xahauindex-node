@@ -83,6 +83,7 @@ export function uriTokenFromRow(
     burn_ledger: row.burn_ledger,
     mint_ledger: row.mint_ledger,
     last_updated: row.last_updated,
+    icon_url: row.icon_url,
     ...(extras?.remarks === undefined ? {} : { remarks: extras.remarks }),
     ...(extras?.transferCount === undefined ? {} : { transfer_count: extras.transferCount }),
   };

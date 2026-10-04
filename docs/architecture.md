@@ -40,7 +40,7 @@ XahauIndex has three layers: an **ingester** (snapshot + live WebSocket), a **SQ
 1. Open SQLite, run migrations, enable WAL + `busy_timeout`.
 2. Connect `@transia/xrpl` `Client` to `XAHAUD_URL` (default mainnet).
 3. If `indexer_state.snapshot_status` is not `complete`, run the snapshot.
-4. Start the TOML worker.
+4. Start the TOML worker and the URI metadata worker (icon URLs only).
 5. If `BACKFILL_FROM_LEDGER` or `BACKFILL_LOOKBACK` is set, walk closed ledgers `FROM..L` in history mode (DEX trades + URIToken transfers only). History fetches use `BACKFILL_XAHAUD_URL` or a second env file (`BACKFILL_ENV` / `.env.backfill`) when set, otherwise `XAHAUD_URL`. Resume via `backfill_next`. Missing historical ledgers are retried, then skipped.
 6. Subscribe to `ledger`. Ignore live apply at or before `snapshot_ledger`. Live starts at `max(MAX(ledgers)+1, live_from_ledger)` and never below `L+1`.
 7. Listen on `API_HOST:API_PORT`. No auth.
@@ -121,6 +121,10 @@ Well-known keys (`name`, `description`, `image`, `icon`, `website`, `attributes`
 HTTPS only, timeout, size cap, no private-IP redirects.
 
 **Blackholed:** `lsfDisableMaster` and (no RegularKey or RegularKey in the known blackhole set).
+
+### Icons
+
+The API returns `icon_url` / `toml_icon_url` strings. Sources: on-ledger remarks (`image` / `icon` / `icon_url`), issuer TOML `icon` (copied onto tokens that have no icon), and optional HTTPS fetch of a URIToken `uri` when it is JSON metadata. If the URI itself looks like an image, that URI is stored. Image bytes are never downloaded for storage or proxied. `data:` URIs are discarded.
 
 ### DEX
 

@@ -48,7 +48,7 @@ describe('openDatabase', () => {
     const applied = db.prepare('SELECT id FROM schema_migrations').all() as Array<{ id: string }>;
     assert.deepEqual(
       applied.map((row) => row.id),
-      ['001_init.sql', '002_issuer_toml.sql', '003_backfill.sql'],
+      ['001_init.sql', '002_issuer_toml.sql', '003_backfill.sql', '004_icon_urls.sql'],
     );
   });
 

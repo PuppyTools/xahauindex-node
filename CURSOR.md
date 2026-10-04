@@ -58,6 +58,7 @@ src/
     uritokens.ts    — URIToken lifecycle
     hooks.ts        — Hook state tracking
     remarks.ts      — Remarks decoder + SetRemarks apply
+    metadata.ts     — URI metadata JSON → icon URL (no image bytes)
     issuers.ts      — issuer profile + domain TOML verification
     dex.ts          — DEX executions → OHLCV candles
   api/
@@ -159,7 +160,9 @@ Data persists in `xahauindex_data`. SQLite at `/data/xahauindex.db` inside the c
 
 In: current-ledger snapshot · live ingest · optional historical backfill (env-bounded) · IOU tokens · URITokens · remarks (URIToken / issuer / trust line) · issuer TOML · DEX historical OHLCV + trades · Hooks · REST + WS · Docker · no API key
 
-Out: auth/rate limiting · Governance Game · multi-node federation · off-ledger metadata scrape
+Out: auth/rate limiting · Governance Game · multi-node federation · icon CDN / image byte cache
+
+Icon URLs come from remarks, issuer TOML, or URI metadata JSON. Persist the URL string only — never download, store, or proxy image bytes. `data:` URIs are rejected.
 
 History mode must not overwrite snapshot balances, owners, issuers, or Hooks. It records DEX trades and URIToken transfers only.
 

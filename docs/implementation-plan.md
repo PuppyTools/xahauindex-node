@@ -27,7 +27,7 @@ Do not start coding against the original attached drafts. Those drafts are super
 - Auth, API keys, rate limiting
 - Governance Game
 - Cross-chain bridges
-- Icon CDN / metadata scraping (Bithomp, Xaman, URI HTTP fetch)
+- Icon CDN / image byte cache (Bithomp, Xaman, URI HTTP image fetch). Icon *URLs* from remarks, TOML, and URI metadata JSON are in scope.
 - Multi-node federation
 - Postgres adapter
 

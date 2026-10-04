@@ -58,6 +58,7 @@ describe('TOML verification', () => {
     assert.equal(verified.toml_icon_url, 'https://example.com/icon.png');
     assert.equal(verified.toml_checked_ledger, 100);
     assert.equal(getToken(db, `USD:${ISSUER}`)?.domain_verified, 1);
+    assert.equal(getToken(db, `USD:${ISSUER}`)?.icon_url, 'https://example.com/icon.png');
 
     const missing = await verifyIssuerToml({
       db,

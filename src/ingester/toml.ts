@@ -5,7 +5,7 @@ import {
   listIssuersDueForToml,
   updateIssuerToml,
 } from '../db/queries/issuers.js';
-import { syncTokenIssuerFlags } from '../db/queries/tokens.js';
+import { fillTokenIconsFromIssuer, syncTokenIssuerFlags } from '../db/queries/tokens.js';
 import type { IssuerRow } from '../types/db.js';
 import {
   fetchXrpLedgerToml,
@@ -57,6 +57,7 @@ export async function verifyIssuerToml(options: {
       toml_checked_ledger: options.ledger,
     });
     syncTokenIssuerFlags(options.db, issuer.account);
+    fillTokenIconsFromIssuer(options.db, issuer.account, profile.icon ?? null);
     if (!verified) {
       options.log.warn({ account: issuer.account, domain: issuer.domain }, 'TOML did not list issuer');
     } else {

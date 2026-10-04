@@ -14,6 +14,7 @@ XahauIndex connects to a xahaud node, snapshots the current ledger, follows it i
 - **IOU tokens** — trust lines, holders, issuer metadata, supply, remarks
 - **URITokens** — Xahau native NFTs; mint / sell / transfer / burn plus Remarks
 - **Issuer profiles** — domain verification via `xrp-ledger.toml`, blackhole detection, AccountRoot remarks
+- **Icon URLs** — remarks, TOML, and URI metadata JSON store `https` / `ipfs` links only. No image cache or CDN.
 - **DEX prices** — OHLCV (`1h` / `24h` / `7d`) and a trade tape, filterable by time or ledger range
 - **Optional history backfill** — walk closed ledgers back from the snapshot (genesis or a lookback) for trades and URIToken transfers without rewriting current balances
 - **Hook activity** — which accounts have Hooks installed and which hashes

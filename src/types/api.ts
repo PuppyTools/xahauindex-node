@@ -116,6 +116,7 @@ export interface URIToken {
   burn_ledger: number | null;
   mint_ledger: number;
   last_updated: number;
+  icon_url: string | null;
   remarks?: RemarksMap;
   transfer_count?: number;
 }

@@ -198,6 +198,7 @@ components:
         icon_url:
           type: string
           nullable: true
+          description: Token icon URL from remarks or the issuer TOML. Stored as a link only; images are not cached.
         website_url:
           type: string
           nullable: true
@@ -300,6 +301,10 @@ components:
           type: integer
         last_updated:
           type: integer
+        icon_url:
+          type: string
+          nullable: true
+          description: On-ledger or URI-metadata image link. The indexer stores the URL only and never caches image bytes.
         remarks:
           $ref: '#/components/schemas/Remarks'
         transfer_count:

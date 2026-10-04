@@ -14,9 +14,11 @@ import {
   getUriToken,
   insertUriTokenTransfer,
   markUriTokenBurned,
+  updateUriTokenIcon,
   upsertUriToken,
 } from '../db/queries/uritokens.js';
 import type { Amount, AccountRootObject, RippleStateObject, URITokenObject } from '../types/xahau.js';
+import { normalizeIconUrl } from '../util/icon.js';
 import {
   absDecimal,
   decodeCurrency,
@@ -274,9 +276,12 @@ export function applyUriTokenFields(
     burn_ledger: existing?.burn_ledger ?? null,
     mint_ledger: existing?.mint_ledger ?? object.PreviousTxnLgrSeq ?? ledger,
     last_updated: ledger,
+    icon_url: existing?.icon_url ?? null,
+    uri_meta_checked_ledger: existing?.uri_meta_checked_ledger ?? null,
   });
   if (fields === undefined || 'Remarks' in fields) {
-    persistRemarks(db, id, 'URIToken', object.Remarks, ledger, { uriTokenId: id });
+    const display = persistRemarks(db, id, 'URIToken', object.Remarks, ledger, { uriTokenId: id });
+    applyUriTokenIcon(db, id, display.iconUrl);
   }
 
   const previousOwner =
@@ -611,4 +616,15 @@ export function applySetRemarks(
       ...(display.websiteUrl === undefined ? {} : { website_url: display.websiteUrl }),
     });
   }
+  if (target.links.uriTokenId) {
+    applyUriTokenIcon(db, target.links.uriTokenId, display.iconUrl);
+  }
+}
+
+function applyUriTokenIcon(db: SqliteDatabase, id: string, iconUrl: string | undefined): void {
+  const icon = normalizeIconUrl(iconUrl);
+  if (!icon) {
+    return;
+  }
+  updateUriTokenIcon(db, id, icon);
 }

@@ -77,6 +77,8 @@ export interface UriTokenRow {
   burn_ledger: number | null;
   mint_ledger: number;
   last_updated: number;
+  icon_url: string | null;
+  uri_meta_checked_ledger: number | null;
 }
 
 export interface UriTokenTransferRow {

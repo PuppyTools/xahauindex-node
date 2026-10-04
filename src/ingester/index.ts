@@ -8,6 +8,7 @@ import { snapshotLedgerBound } from './ledger.js';
 import { followLive, type LiveLogger } from './live.js';
 import { runSnapshot } from './snapshot.js';
 import { createBackfillSource, createXahauSource, type XahauSource } from './source.js';
+import { runUriMetaWorker } from './metadata.js';
 import { runTomlWorker } from './toml.js';
 
 export async function startIngester(options: {
@@ -58,6 +59,11 @@ export async function startIngester(options: {
       log: options.log,
       ...(options.signal === undefined ? {} : { signal: options.signal }),
     });
+    const uriMeta = runUriMetaWorker({
+      db: options.db,
+      log: options.log,
+      ...(options.signal === undefined ? {} : { signal: options.signal }),
+    });
     const backfill = runDedicatedBackfill({
       db: options.db,
       liveSource: source,
@@ -65,7 +71,7 @@ export async function startIngester(options: {
       log: options.log,
       ...(options.signal === undefined ? {} : { signal: options.signal }),
     });
-    await Promise.all([live, toml, backfill]);
+    await Promise.all([live, toml, uriMeta, backfill]);
   } finally {
     await source.disconnect();
   }

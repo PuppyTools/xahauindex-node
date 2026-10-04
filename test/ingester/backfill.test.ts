@@ -154,6 +154,8 @@ describe('applyHistoricalLedger', () => {
       burn_ledger: null,
       mint_ledger: 10,
       last_updated: 50,
+      icon_url: null,
+      uri_meta_checked_ledger: null,
     });
 
     const historical = applyHistoricalLedger(

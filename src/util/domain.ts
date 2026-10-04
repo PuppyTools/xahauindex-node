@@ -155,36 +155,74 @@ export function pickTomlProfile(
   };
 }
 
+export async function fetchPublicHttpsText(
+  url: string,
+  options: {
+    maxBytes?: number;
+    timeoutMs?: number;
+    accept?: string;
+    fetchImpl?: typeof fetch;
+  } = {},
+): Promise<{ text: string; contentType: string }> {
+  const parsed = new URL(url);
+  if (parsed.protocol !== 'https:') {
+    throw new Error('Only https URLs can be fetched');
+  }
+  assertSafeTomlHost(parsed.hostname);
+  const resolved = await lookup(parsed.hostname, { all: true });
+  if (resolved.some((record) => isPrivateIp(record.address))) {
+    throw new Error(`Host ${parsed.hostname} resolved to a private address`);
+  }
+
+  const fetchImpl = options.fetchImpl ?? fetch;
+  const controller = new AbortController();
+  const timer = setTimeout(() => {
+    controller.abort();
+  }, options.timeoutMs ?? TOML_TIMEOUT_MS);
+  try {
+    const response = await fetchImpl(url, {
+      signal: controller.signal,
+      redirect: 'error',
+      headers: { accept: options.accept ?? '*/*' },
+    });
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}`);
+    }
+    const contentType = response.headers.get('content-type') ?? '';
+    if (contentType.toLowerCase().startsWith('image/')) {
+      return { text: '', contentType };
+    }
+    const buffer = Buffer.from(await response.arrayBuffer());
+    if (buffer.byteLength > (options.maxBytes ?? TOML_MAX_BYTES)) {
+      throw new Error('Response too large');
+    }
+    return { text: buffer.toString('utf8'), contentType };
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 export async function fetchXrpLedgerToml(
   domain: string,
   fetchImpl: typeof fetch = fetch,
 ): Promise<string> {
   const host = domain.replace(/^https?:\/\//, '').replace(/\/.*$/, '');
-  assertSafeTomlHost(host);
-  const resolved = await lookup(host, { all: true });
-  if (resolved.some((record) => isPrivateIp(record.address))) {
-    throw new Error(`TOML host ${host} resolved to a private address`);
-  }
-
-  const controller = new AbortController();
-  const timer = setTimeout(() => {
-    controller.abort();
-  }, TOML_TIMEOUT_MS);
   try {
-    const response = await fetchImpl(`https://${host}/.well-known/xrp-ledger.toml`, {
-      signal: controller.signal,
-      redirect: 'error',
-      headers: { accept: 'text/plain, application/toml, */*' },
+    const fetched = await fetchPublicHttpsText(`https://${host}/.well-known/xrp-ledger.toml`, {
+      maxBytes: TOML_MAX_BYTES,
+      timeoutMs: TOML_TIMEOUT_MS,
+      accept: 'text/plain, application/toml, */*',
+      fetchImpl,
     });
-    if (!response.ok) {
-      throw new Error(`TOML HTTP ${response.status}`);
+    return fetched.text;
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    if (message.startsWith('HTTP ')) {
+      throw new Error(`TOML ${message}`, { cause: error });
     }
-    const buffer = Buffer.from(await response.arrayBuffer());
-    if (buffer.byteLength > TOML_MAX_BYTES) {
-      throw new Error('TOML response too large');
+    if (message.startsWith('Host ')) {
+      throw new Error(`TOML host ${message.slice('Host '.length)}`, { cause: error });
     }
-    return buffer.toString('utf8');
-  } finally {
-    clearTimeout(timer);
+    throw error;
   }
 }
