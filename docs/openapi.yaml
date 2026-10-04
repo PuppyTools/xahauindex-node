@@ -13,7 +13,7 @@ info:
     No API key. Operators may enable a per-IP HTTP limit (`API_RATE_LIMIT_MAX`);
     over the limit the API returns `429` with `error.code` `RATE_LIMITED`.
   contact:
-    url: https://github.com/PuppyTools/xahauindex-node
+    url: https://xahauindex.dev
   license:
     name: MIT
 
@@ -28,6 +28,13 @@ x-docs:
     XahauIndex snapshots the current ledger, follows it live, and serves enriched
     REST + WebSocket APIs for IOUs, URITokens, issuer profiles, DEX candles, and Hooks.
     No API key. Operators can turn on a per-IP rate limit. Put a reverse proxy in front if you want TLS.
+  notice: >
+    XahauIndex is an independent [PuppyTools](https://github.com/PuppyTools) project.
+    It is not affiliated with, endorsed by, or a product of the
+    [Xahau](https://xahau.network) network or its operators. The XI mark is original
+    artwork inspired by the official letterforms in
+    [Xahau/Graphics](https://github.com/Xahau/Graphics).
+  site: https://xahauindex.dev
   donate:
     label: Donations in XAH
     address: rPUPpkfohJsWVoXoXDbNZ7zKfk2FBB8Xwo

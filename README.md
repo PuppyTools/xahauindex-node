@@ -4,7 +4,9 @@
 
 XahauIndex connects to a xahaud node, snapshots the current ledger, follows it in real time, and serves an enriched REST + WebSocket API covering IOU tokens, URITokens, issuer profiles, DEX prices, and Hook activity — the Xahau equivalent of [xrplmeta](https://github.com/xrplmeta/node).
 
-> Run your own instance. No API key. Put a reverse proxy in front if you want TLS. Optional IP rate limits are env-off.
+> Project site: [https://xahauindex.dev](https://xahauindex.dev). Or run your own — no API key. Put a reverse proxy in front if you want TLS. Optional IP rate limits are env-off.
+
+XahauIndex is an independent [PuppyTools](https://github.com/PuppyTools) project. It is not affiliated with, endorsed by, or a product of the [Xahau](https://xahau.network) network or its operators. The XI mark is original artwork inspired by the official letterforms in [Xahau/Graphics](https://github.com/Xahau/Graphics).
 
 ---
 
@@ -60,6 +62,7 @@ XAHAUD_URL=wss://xahau.network
 DB_PATH=./data/xahauindex.db
 API_PORT=3000
 API_HOST=0.0.0.0
+# API_BASE_URL=https://xahauindex.dev
 LOG_LEVEL=info
 # BACKFILL_FROM_LEDGER=genesis
 # BACKFILL_LOOKBACK=10000
@@ -81,6 +84,8 @@ Historical backfill is **off** unless you set one of:
 | `BACKFILL_MIN_INTERVAL_MS` | Delay between historical fetches. Unset = `2000` when sharing `XAHAUD_URL`, `0` on a dedicated history node. |
 
 If both stop bounds are set, `BACKFILL_FROM_LEDGER` wins. The walk starts at the snapshot ledger and decrements until that bound — `genesis` means keep going backward until ledger 1. Resume is the next lower ledger (`backfill_next`). Use a full-history node for backfill when the subscription node does not keep old ledgers. Sharing the public RPC with live subscribe is paced (2s) so a genesis walk cannot exhaust the 10s quota and drop the live stream. Live fetches win the shared socket; `tooBusy` sets one cooldown and pauses backfill so both sides do not retry together. Rate-limit responses do not skip a ledger or stop the process. Public nodes that still cannot serve an index are retried, then skipped. The snapshot remains the source of current balances, owners, issuers, and Hooks. Backfill records DEX trades and URIToken transfers only.
+
+`API_BASE_URL` is the origin written into `/docs` cookbook curls, endpoint Open links, and `/v1/openapi.yaml`. Default `http://localhost:3000` when unset. It does not change `API_HOST` / `API_PORT`. The hosted project site is [https://xahauindex.dev](https://xahauindex.dev).
 
 Operator rate limiting is **off** unless `API_RATE_LIMIT_MAX` is a positive integer. There is still no API key.
 
@@ -264,4 +269,6 @@ A finished snapshot is required for `/v1/hooks`. Restarting a node that already 
 
 ## License
 
-MIT
+MIT.
+
+XahauIndex is not affiliated with Xahau. See the notice at the top of this README. The XI mark credits [Xahau/Graphics](https://github.com/Xahau/Graphics) for the letterform inspiration.

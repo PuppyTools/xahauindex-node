@@ -14,6 +14,11 @@ export interface Config {
   dbPath: string;
   apiPort: number;
   apiHost: string;
+  /**
+   * Public origin shown in `/docs` cookbook curls, Open links, and the served
+   * OpenAPI `servers` URL. Listen address is still `apiHost`/`apiPort`.
+   */
+  apiBaseUrl: string;
   logLevel: LogLevel;
   /** Earliest ledger the historical walk stops at, or null to skip. `1` is genesis. */
   backfillFromLedger: number | null;
@@ -170,6 +175,7 @@ function readOptionalNonNegativeInt(env: NodeJS.ProcessEnv, key: string): number
 export const SHARED_BACKFILL_INTERVAL_MS = 2_000;
 export const DEFAULT_API_RATE_LIMIT_WINDOW_MS = 60_000;
 export const DEFAULT_WS_MAX_PER_IP = 8;
+export const DEFAULT_API_BASE_URL = 'http://localhost:3000';
 
 function readOptionalPositiveInt(env: NodeJS.ProcessEnv, key: string): number | null {
   const raw = env[key];
@@ -269,6 +275,50 @@ export function resolveWsMaxPerIp(config: Config): number | null {
   return config.apiRateLimitMax === null ? null : DEFAULT_WS_MAX_PER_IP;
 }
 
+export function resolveWsBaseUrl(baseUrl: string): string {
+  const url = new URL(baseUrl);
+  if (url.protocol === 'https:') {
+    url.protocol = 'wss:';
+  } else if (url.protocol === 'http:') {
+    url.protocol = 'ws:';
+  }
+  const path = url.pathname.replace(/\/+$/, '');
+  return `${url.origin}${path === '/' ? '' : path}`;
+}
+
+export function rewriteDocsBaseUrl(text: string, baseUrl: string): string {
+  return text
+    .replaceAll(DEFAULT_API_BASE_URL, baseUrl)
+    .replaceAll(resolveWsBaseUrl(DEFAULT_API_BASE_URL), resolveWsBaseUrl(baseUrl));
+}
+
+function readApiBaseUrl(env: NodeJS.ProcessEnv): string {
+  const raw = env.API_BASE_URL;
+  if (raw === undefined || raw.trim() === '') {
+    return DEFAULT_API_BASE_URL;
+  }
+  const trimmed = raw.trim().replace(/\/+$/, '');
+  let parsed: URL;
+  try {
+    parsed = new URL(trimmed);
+  } catch {
+    throw new ConfigError('API_BASE_URL must be a valid http:// or https:// URL');
+  }
+  if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+    throw new ConfigError('API_BASE_URL must use http:// or https://');
+  }
+  if (parsed.username !== '' || parsed.password !== '') {
+    throw new ConfigError('API_BASE_URL must not include credentials');
+  }
+  if (parsed.search !== '' || parsed.hash !== '') {
+    throw new ConfigError('API_BASE_URL must not include a query or fragment');
+  }
+  if (parsed.hostname === '') {
+    throw new ConfigError('API_BASE_URL must include a hostname');
+  }
+  return trimmed;
+}
+
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
   const backfillNode = readBackfillNode(env);
   return {
@@ -276,6 +326,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     dbPath: readString(env, 'DB_PATH', './data/xahauindex.db'),
     apiPort: readPort(env, 'API_PORT', 3000),
     apiHost: readString(env, 'API_HOST', '0.0.0.0'),
+    apiBaseUrl: readApiBaseUrl(env),
     logLevel: readLogLevel(env),
     backfillFromLedger: readBackfillFromLedger(env),
     backfillLookback: readOptionalPositiveInt(env, 'BACKFILL_LOOKBACK'),
