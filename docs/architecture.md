@@ -117,7 +117,7 @@ Well-known keys (`name`, `description`, `image`, `icon`, `website`, `attributes`
 
 ### Issuers + TOML
 
-`account_info` → Domain hex → `https://<domain>/.well-known/xrp-ledger.toml`. Verified if the r-address appears in `[[ACCOUNTS]]`. Re-check ~every 1000 ledgers and on Domain-changing `AccountSet`.
+`account_info` → Domain hex (printable hostname only) → `https://<domain>/.well-known/xrp-ledger.toml`. Hex blobs and non-hostnames are stored if printable but never fetched. Verified if the r-address appears in `[[ACCOUNTS]]`. Re-check ~every 1000 ledgers and on Domain-changing `AccountSet`. Expected fetch misses (NXDOMAIN, timeout, 404, bad cert) are debug; a pass summary is info.
 
 HTTPS only, timeout, size cap, no private-IP redirects.
 

@@ -214,7 +214,7 @@ On first sight (snapshot or first trust line):
 5. Store `toml_*` fields + `toml_raw` as JSON
 6. Re-verify about every 1000 ledgers, and on `AccountSet` that changes Domain
 
-TOML failures: `domain_verified = 0`, log `warn`, retry with backoff. Never fail the ledger transaction.
+TOML failures: `domain_verified = 0`, expected network misses at debug, retry every 1000 ledgers. Never fail the ledger transaction.
 
 **Blackholed:** `lsfDisableMaster` set **and** (`RegularKey` missing **or** RegularKey ∈ known blackhole set). Seed the set with the well-known XRPL/Xahau sink addresses (`rrrrrrrrrrrrrrrrrrrrBZbvji`, `rrrrrrrrrrrrrrrrrrrrn5RM1rHd`, and any Xahau-documented equivalents). Make the list a constant in `util/xahau.ts`.
 
