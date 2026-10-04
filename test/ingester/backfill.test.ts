@@ -9,7 +9,12 @@ import { getUriToken, listUriTokenTransfers, upsertUriToken } from '../../src/db
 import { createServer } from 'node:http';
 import type { AddressInfo } from 'node:net';
 
-import { BACKFILL_DIRECTION, resumeBackfillIndex, runBackfill } from '../../src/ingester/backfill.js';
+import {
+  BACKFILL_DIRECTION,
+  backfillProgress,
+  resumeBackfillIndex,
+  runBackfill,
+} from '../../src/ingester/backfill.js';
 import { runDedicatedBackfill } from '../../src/ingester/index.js';
 import { applyClosedLedger, applyHistoricalLedger } from '../../src/ingester/ledger.js';
 import type { ClosedLedger } from '../../src/ingester/source.js';
@@ -419,6 +424,34 @@ describe('runBackfill', () => {
     assert.equal(getIndexerState(db, 'backfill_next'), '8');
   });
 
+  it('logs backward progress with remaining ledgers', async () => {
+    const db = memoryDb();
+    seedSnapshot(db, 5);
+    const messages: Array<{ msg: string; remaining?: number; next?: number }> = [];
+    await runBackfill({
+      db,
+      config: testConfig({ backfillFromLedger: 4 }),
+      log: {
+        ...silentLog,
+        info: (obj, msg) => {
+          messages.push({
+            msg,
+            remaining: typeof obj.remaining === 'number' ? obj.remaining : undefined,
+            next: typeof obj.next === 'number' ? obj.next : undefined,
+          });
+        },
+      },
+      source: {
+        getLedgerWithTransactions: async (index) => closedLedger(index, []),
+      },
+    });
+    assert.equal(messages[0]?.msg, 'historical backfill starting (snapshot → FROM)');
+    assert.equal(messages[0]?.remaining, 2);
+    assert.ok(messages.some((entry) => entry.msg === 'historical backfill progress'));
+    assert.equal(messages.at(-1)?.msg, 'historical backfill complete');
+    assert.equal(messages.at(-1)?.remaining, 0);
+  });
+
   it('restarts an old forward walk at the snapshot', async () => {
     const db = memoryDb();
     seedSnapshot(db, 12);
@@ -442,6 +475,38 @@ describe('runBackfill', () => {
     assert.deepEqual(requested, [12, 11, 10, 9, 8]);
     assert.equal(getIndexerState(db, 'backfill_direction'), BACKFILL_DIRECTION);
     assert.equal(getIndexerState(db, 'backfill_next'), '7');
+  });
+});
+
+describe('backfillProgress', () => {
+  it('counts remaining ledgers while walking down from the snapshot', () => {
+    assert.deepEqual(backfillProgress(1, 100, 100), {
+      from: 1,
+      through: 100,
+      next: 100,
+      remaining: 100,
+      done: 0,
+      pct: 0,
+      direction: BACKFILL_DIRECTION,
+    });
+    assert.deepEqual(backfillProgress(1, 100, 50), {
+      from: 1,
+      through: 100,
+      next: 50,
+      remaining: 50,
+      done: 50,
+      pct: 50,
+      direction: BACKFILL_DIRECTION,
+    });
+    assert.deepEqual(backfillProgress(1, 100, 0), {
+      from: 1,
+      through: 100,
+      next: 0,
+      remaining: 0,
+      done: 100,
+      pct: 100,
+      direction: BACKFILL_DIRECTION,
+    });
   });
 });
 

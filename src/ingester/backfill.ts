@@ -42,6 +42,22 @@ function snapshotLedger(db: SqliteDatabase): number | null {
  * recent history is filled first. A completed narrower range continues downward
  * from the previous `FROM` without re-walking the high end.
  */
+export function backfillProgress(from: number, through: number, next: number): {
+  from: number;
+  through: number;
+  next: number;
+  remaining: number;
+  done: number;
+  pct: number;
+  direction: typeof BACKFILL_DIRECTION;
+} {
+  const total = Math.max(0, through - from + 1);
+  const remaining = next < from ? 0 : Math.max(0, next - from + 1);
+  const done = Math.max(0, total - remaining);
+  const pct = total === 0 ? 100 : Math.floor((done / total) * 100);
+  return { from, through, next, remaining, done, pct, direction: BACKFILL_DIRECTION };
+}
+
 export function resumeBackfillIndex(options: {
   from: number;
   through: number;
@@ -118,10 +134,12 @@ export async function runBackfill(options: {
   setIndexerState(db, 'backfill_direction', BACKFILL_DIRECTION);
   setIndexerState(db, 'backfill_next', String(index));
   setIndexerState(db, 'backfill_status', 'running');
-  log.info({ from, through, next: index, direction: BACKFILL_DIRECTION }, 'historical backfill starting');
+  log.info(backfillProgress(from, through, index), 'historical backfill starting (snapshot → FROM)');
 
   let applied = 0;
   let skippedLedgers = 0;
+  const shouldLogProgress = (next: number, force: boolean): boolean =>
+    force || next < from || next % 100 === 0;
   while (index >= from) {
     if (options.signal?.aborted) {
       throw options.signal.reason ?? new Error('aborted');
@@ -142,6 +160,12 @@ export async function runBackfill(options: {
       skippedLedgers += 1;
       index -= 1;
       setIndexerState(db, 'backfill_next', String(index));
+      if (shouldLogProgress(index, false)) {
+        log.info(
+          { ...backfillProgress(from, through, index), skippedLedgers },
+          'historical backfill progress',
+        );
+      }
       continue;
     }
 
@@ -150,15 +174,24 @@ export async function runBackfill(options: {
     setIndexerState(db, 'backfill_ledger', String(result.index));
     index -= 1;
     setIndexerState(db, 'backfill_next', String(index));
-    if (applied === 1 || index < from || index % 100 === 0) {
+    if (shouldLogProgress(index, applied === 1)) {
       log.info(
-        { ledger: result.index, next: index, from, through, txApplied: result.txApplied, trades: result.trades.length },
-        'historical ledger applied',
+        {
+          ...backfillProgress(from, through, index),
+          ledger: result.index,
+          txApplied: result.txApplied,
+          trades: result.trades.length,
+          skippedLedgers,
+        },
+        'historical backfill progress',
       );
     }
   }
 
   setIndexerState(db, 'backfill_status', 'complete');
-  log.info({ from, through, applied, skippedLedgers }, 'historical backfill complete');
+  log.info(
+    { ...backfillProgress(from, through, from - 1), applied, skippedLedgers },
+    'historical backfill complete',
+  );
   return { skipped: false, from, through, applied, skippedLedgers };
 }
