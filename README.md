@@ -147,7 +147,7 @@ See [`docs/architecture.md`](docs/architecture.md) and [`docs/implementation-pla
 
 **URITokens** are Xahau's native NFT format (not XLS-20). Each has a `URITokenID`, a hex `URI`, and optional Remarks.
 
-**Hooks** are smart contracts attached to accounts. XahauIndex stores the active Hook array.
+**Hooks** are smart contracts attached to accounts. On Xahau they live on a `Hook` ledger object (`Account` + `Hooks` array), not on `AccountRoot`. XahauIndex stores that active array.
 
 **Remarks** are on-ledger `{ name, value }` pairs (hex). v1 indexes them on URITokens, issuer accounts, and issuer-side trust lines.
 

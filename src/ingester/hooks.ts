@@ -1,6 +1,10 @@
 import type { HookEntry as ApiHookEntry, HookGrant, HookParameter } from '../types/api.js';
-import type { HookEntry } from '../types/xahau.js';
+import type { HookFields, HookGrant as LedgerHookGrant, HookParameter as LedgerHookParameter } from '../types/xahau.js';
 import { hexToUtf8 } from '../util/xahau.js';
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
 
 function decodeMaybeHex(value: string | undefined): string | undefined {
   if (value === undefined) {
@@ -10,10 +14,23 @@ function decodeMaybeHex(value: string | undefined): string | undefined {
   return decoded === '' ? value : decoded;
 }
 
-function parametersOf(entry: HookEntry): HookParameter[] {
-  const raw = entry.Hook?.HookParameters ?? [];
+export function hookFieldsOf(entry: unknown): HookFields | undefined {
+  if (!isRecord(entry)) {
+    return undefined;
+  }
+  if (isRecord(entry.Hook)) {
+    return entry.Hook as HookFields;
+  }
+  if (typeof entry.HookHash === 'string' && entry.HookHash !== '') {
+    return entry as HookFields;
+  }
+  return undefined;
+}
+
+function parametersOf(fields: HookFields): HookParameter[] {
+  const raw = fields.HookParameters ?? [];
   const out: HookParameter[] = [];
-  for (const item of raw) {
+  for (const item of raw as LedgerHookParameter[]) {
     const name = decodeMaybeHex(item.HookParameter?.HookParameterName);
     const value = item.HookParameter?.HookParameterValue;
     out.push({
@@ -24,10 +41,10 @@ function parametersOf(entry: HookEntry): HookParameter[] {
   return out;
 }
 
-function grantsOf(entry: HookEntry): HookGrant[] {
-  const raw = entry.Hook?.HookGrants ?? [];
+function grantsOf(fields: HookFields): HookGrant[] {
+  const raw = fields.HookGrants ?? [];
   const out: HookGrant[] = [];
-  for (const item of raw) {
+  for (const item of raw as LedgerHookGrant[]) {
     out.push({
       ...(item.HookGrant?.Authorize === undefined ? {} : { account: item.HookGrant.Authorize }),
       ...(item.HookGrant?.HookHash === undefined ? {} : { hook_hash: item.HookGrant.HookHash }),
@@ -36,24 +53,25 @@ function grantsOf(entry: HookEntry): HookGrant[] {
   return out;
 }
 
-export function normalizeHookEntries(entries: HookEntry[]): ApiHookEntry[] {
+export function normalizeHookEntries(entries: readonly unknown[]): ApiHookEntry[] {
   const out: ApiHookEntry[] = [];
   for (const entry of entries) {
-    const hash = entry.Hook?.HookHash;
-    if (!hash) {
+    const fields = hookFieldsOf(entry);
+    const hash = fields?.HookHash;
+    if (!fields || !hash) {
       continue;
     }
-    const hookName = decodeMaybeHex(entry.Hook?.HookName);
+    const hookName = decodeMaybeHex(fields.HookName);
     out.push({
       hook_hash: hash,
-      hook_on: entry.Hook?.HookOn ?? null,
-      hook_on_incoming: entry.Hook?.HookOnIncoming ?? null,
-      hook_on_outgoing: entry.Hook?.HookOnOutgoing ?? null,
-      hook_namespace: entry.Hook?.HookNamespace ?? null,
+      hook_on: fields.HookOn ?? null,
+      hook_on_incoming: fields.HookOnIncoming ?? null,
+      hook_on_outgoing: fields.HookOnOutgoing ?? null,
+      hook_namespace: fields.HookNamespace ?? null,
       hook_name: hookName ?? null,
-      hook_api_version: entry.Hook?.HookApiVersion ?? null,
-      parameters: parametersOf(entry),
-      grants: grantsOf(entry),
+      hook_api_version: fields.HookApiVersion ?? null,
+      parameters: parametersOf(fields),
+      grants: grantsOf(fields),
     });
   }
   return out;

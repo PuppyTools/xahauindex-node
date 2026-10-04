@@ -55,7 +55,6 @@ const issuerRoot = {
   Account: ISSUER,
   Flags: 0,
   Domain: Buffer.from('example.com').toString('hex'),
-  Hook: [{ Hook: { HookHash: HOOK_HASH, HookOn: '0' } }],
   Remarks: [
     {
       Remark: {
@@ -63,6 +62,19 @@ const issuerRoot = {
         RemarkValue: Buffer.from('https://example.com').toString('hex'),
       },
     },
+  ],
+};
+
+const hookObject = {
+  LedgerEntryType: 'Hook',
+  index: 'B'.repeat(64),
+  Account: ISSUER,
+  Flags: 0,
+  Hooks: [
+    { Hook: { HookHash: HOOK_HASH, HookOn: '0' } },
+    { Hook: {} },
+    { Hook: {} },
+    { Hook: {} },
   ],
 };
 
@@ -134,7 +146,7 @@ describe('runSnapshot', () => {
     const db = memoryDb();
     const result = await runSnapshot({
       db,
-      source: pagesSource([[rippleState], [issuerRoot, uriToken]]),
+      source: pagesSource([[rippleState], [issuerRoot, hookObject, uriToken]]),
       log: silentLog,
     });
     assert.equal(result.skipped, false);
@@ -166,6 +178,7 @@ describe('runSnapshot', () => {
     const tokens = await app.inject({ method: 'GET', url: '/v1/tokens' });
     const nftRes = await app.inject({ method: 'GET', url: `/v1/uritokens/${URI_ID}` });
     const issuerRes = await app.inject({ method: 'GET', url: `/v1/issuers/${ISSUER}` });
+    const hooksRes = await app.inject({ method: 'GET', url: '/v1/hooks' });
     assert.equal(status.json().data.status, 'live');
     assert.equal(status.json().data.token_count, 1);
     assert.equal(status.json().data.uri_token_count, 1);
@@ -173,6 +186,10 @@ describe('runSnapshot', () => {
     assert.equal(nftRes.json().data.remarks.name, 'Cool NFT');
     assert.equal(issuerRes.json().data.domain, 'example.com');
     assert.equal(issuerRes.json().data.has_hooks, true);
+    assert.equal(hooksRes.json().data.length, 1);
+    assert.equal(hooksRes.json().data[0].account, ISSUER);
+    assert.equal(hooksRes.json().data[0].hook_count, 1);
+    assert.equal(hooksRes.json().data[0].hooks[0].hook_hash, HOOK_HASH);
     await app.close();
   });
 

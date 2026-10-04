@@ -91,7 +91,7 @@ Xahau's native NFT format. **Not** XLS-20 NFTs. Key fields:
 - `Destination` — optional buyer restriction on the sell offer
 
 ### Hooks
-Smart contracts on the account (`Hook` array on `AccountRoot`). Persist `HookHash`, parameters, grants, namespace, `HookOn` **and** `HookOnIncoming` / `HookOnOutgoing` / `HookName` when present.
+Xahau stores installed hooks on a dedicated `LedgerEntryType: Hook` object (`Account` + `Hooks` array), not on `AccountRoot`. `AccountRoot` only has `HookNamespaces` / `HookStateCount` / `HookStateScale`. Persist `HookHash`, parameters, grants, namespace, `HookOn` **and** `HookOnIncoming` / `HookOnOutgoing` / `HookName` when present. Empty `{ Hook: {} }` slots are ignored.
 
 ### Remarks
 On-ledger key/value metadata via the Remarks amendment / `SetRemarks`. Each entry is hex `RemarkName` + optional `RemarkValue` (omit value to delete). Max 32 per object. `Flags & 1` = immutable.

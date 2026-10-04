@@ -1019,7 +1019,7 @@ paths:
     get:
       operationId: listHookAccounts
       tags: [hooks]
-      summary: List accounts with active Hooks
+      summary: List accounts with an active Hook ledger object
       parameters:
         - $ref: '#/components/parameters/page'
         - $ref: '#/components/parameters/per_page'

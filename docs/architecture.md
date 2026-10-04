@@ -16,7 +16,7 @@ XahauIndex has three layers: an **ingester** (snapshot + live WebSocket), a **SQ
 │  ledger.ts     — one SQLite transaction per closed ledger        │
 │  tokens.ts     — RippleState / TrustSet / IOU Payment            │
 │  uritokens.ts  — URIToken mint/burn/offer/buy                    │
-│  hooks.ts      — AccountRoot Hook array                          │
+│  hooks.ts      — Hook ledger object (Account + Hooks array)      │
 │  remarks.ts    — Remarks decode + SetRemarks                     │
 │  issuers.ts    — AccountRoot + TOML (async worker)               │
 │  dex.ts        — executed offers → trades + calendar candles     │
@@ -61,7 +61,8 @@ Objects consumed during snapshot:
 |------|--------|
 | `RippleState` | `trust_lines`, parent `tokens` / `issuers`, remarks |
 | `URIToken` | `uri_tokens`, remarks |
-| `AccountRoot` | `issuers` (Domain / flags / later issuer), `hook_accounts`, remarks |
+| `AccountRoot` | `issuers` (Domain / flags / later issuer), remarks |
+| `Hook` | `hook_accounts`, `issuers.has_hooks` |
 
 ### Live stream
 
@@ -117,7 +118,7 @@ Well-known keys (`name`, `description`, `image`, `icon`, `website`, `attributes`
 
 ### Hooks
 
-`SetHook` replaces the stored array for that account. Persist HookOn v1 and v2 fields when present.
+Installed hooks are a `Hook` ledger object ([Xahau Hook](https://xahau.network/docs/protocol-reference/ledger-data/ledger-objects-types/hook/)): `Account` plus a `Hooks` array of `{ Hook: { HookHash, … } }` slots. Snapshot indexes those objects from `ledger_data`. Live `SetHook` creates / replaces / deletes the same object. `AccountRoot` does not carry the hook array. Persist HookOn v1 and v2 fields when present. Empty slots are dropped.
 
 ### Issuers + TOML
 

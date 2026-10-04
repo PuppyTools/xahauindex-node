@@ -7,6 +7,10 @@ export function getHookAccount(db: SqliteDatabase, account: string): HookAccount
     | undefined;
 }
 
+export function deleteHookAccount(db: SqliteDatabase, account: string): void {
+  db.prepare('DELETE FROM hook_accounts WHERE account = ?').run(account);
+}
+
 export function upsertHookAccount(db: SqliteDatabase, row: HookAccountRow): void {
   db.prepare(
     `
@@ -34,7 +38,7 @@ export function listHookAccounts(
       .prepare(
         `
         SELECT * FROM hook_accounts
-        WHERE hooks_json LIKE @hook_hash
+        WHERE hook_count > 0 AND hooks_json LIKE @hook_hash
         ORDER BY account ASC
         LIMIT @limit OFFSET @offset
         `,
@@ -45,6 +49,7 @@ export function listHookAccounts(
     .prepare(
       `
       SELECT * FROM hook_accounts
+      WHERE hook_count > 0
       ORDER BY account ASC
       LIMIT @limit OFFSET @offset
       `,

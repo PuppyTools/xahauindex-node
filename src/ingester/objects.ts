@@ -1,6 +1,12 @@
 import type { SqliteDatabase } from '../db/client.js';
-import { getHookAccount, upsertHookAccount } from '../db/queries/hooks.js';
-import { ensureIssuer, getIssuer, invalidateIssuerToml, updateIssuerOnChain } from '../db/queries/issuers.js';
+import { deleteHookAccount, getHookAccount, upsertHookAccount } from '../db/queries/hooks.js';
+import {
+  ensureIssuer,
+  getIssuer,
+  invalidateIssuerToml,
+  setIssuerHasHooks,
+  updateIssuerOnChain,
+} from '../db/queries/issuers.js';
 import { deleteRemark, listRemarksByObject, upsertRemark } from '../db/queries/remarks.js';
 import {
   deleteTrustLine,
@@ -17,7 +23,13 @@ import {
   updateUriTokenIcon,
   upsertUriToken,
 } from '../db/queries/uritokens.js';
-import type { Amount, AccountRootObject, RippleStateObject, URITokenObject } from '../types/xahau.js';
+import type {
+  Amount,
+  AccountRootObject,
+  HookObject,
+  RippleStateObject,
+  URITokenObject,
+} from '../types/xahau.js';
 import { normalizeIconUrl } from '../util/icon.js';
 import {
   absDecimal,
@@ -32,6 +44,7 @@ import {
 } from '../util/xahau.js';
 import {
   parseAccountRoot,
+  parseHookObject,
   parseRippleState,
   parseUriToken,
   type ParsedAffectedNode,
@@ -335,9 +348,7 @@ export function applyAccountRoot(
     return;
   }
   const existingIssuer = getIssuer(db, object.Account);
-  const hookFieldsPresent = fields === undefined || 'Hook' in fields;
-  const hooks = object.Hook ? normalizeHookEntries(object.Hook) : [];
-  const hasHooks = hookFieldsPresent ? hooks.length > 0 : existingIssuer?.has_hooks === 1;
+  const hasHooks = existingIssuer?.has_hooks === 1;
   const domain =
     fields !== undefined && !('Domain' in fields)
       ? (existingIssuer?.domain ?? null)
@@ -373,7 +384,7 @@ export function applyAccountRoot(
       transfer_rate: transferRate,
       flags,
       blackholed,
-      has_hooks: hasHooks ? 1 : 0,
+      has_hooks: existingIssuer?.has_hooks ?? 0,
       last_updated: ledger,
     });
     if (domainChanged) {
@@ -381,19 +392,6 @@ export function applyAccountRoot(
     }
     if (domainChanged || blackholeChanged) {
       syncTokenIssuerFlags(db, object.Account);
-    }
-  }
-
-  if (hookFieldsPresent) {
-    const existingHook = getHookAccount(db, object.Account);
-    if (hasHooks || existingHook) {
-      upsertHookAccount(db, {
-        account: object.Account,
-        hook_count: hooks.length,
-        hooks_json: JSON.stringify(hooks),
-        first_ledger: existingHook?.first_ledger ?? ledger,
-        last_updated: ledger,
-      });
     }
   }
 
@@ -463,10 +461,15 @@ export function applyLedgerObject(
     applyUriToken(db, uriToken, ledger, log);
     return;
   }
+  const hook = parseHookObject(raw);
+  if (hook) {
+    applyHookObject(db, hook, ledger);
+    return;
+  }
   const account = parseAccountRoot(raw);
   if (account) {
     cacheAccountRoot(accountCache, account);
-    if (account.Domain || (account.Hook && account.Hook.length > 0)) {
+    if (account.Domain) {
       applyAccountRoot(db, account, ledger);
     }
   }
@@ -508,6 +511,19 @@ export function applyAffectedLedgerNode(
     });
     return null;
   }
+  if (node.type === 'Hook') {
+    const hook = parseHookObject(raw);
+    if (!hook) {
+      log.warn({ index: node.index, kind: node.kind }, 'skipping malformed Hook node');
+      return null;
+    }
+    if (node.kind === 'deleted') {
+      applyDeletedHookObject(db, hook, ledger);
+      return null;
+    }
+    applyHookObject(db, hook, ledger);
+    return null;
+  }
   if (node.type === 'AccountRoot') {
     const account = parseAccountRoot(raw);
     if (!account) {
@@ -516,6 +532,37 @@ export function applyAffectedLedgerNode(
     applyAccountRoot(db, account, ledger, node.fields);
   }
   return null;
+}
+
+export function applyHookObject(db: SqliteDatabase, object: HookObject, ledger: number): void {
+  if (!isValidAccount(object.Account)) {
+    return;
+  }
+  const hooks = normalizeHookEntries(object.Hooks);
+  const existing = getHookAccount(db, object.Account);
+  if (hooks.length === 0) {
+    if (existing) {
+      deleteHookAccount(db, object.Account);
+    }
+    setIssuerHasHooks(db, object.Account, 0, ledger);
+    return;
+  }
+  upsertHookAccount(db, {
+    account: object.Account,
+    hook_count: hooks.length,
+    hooks_json: JSON.stringify(hooks),
+    first_ledger: existing?.first_ledger ?? ledger,
+    last_updated: ledger,
+  });
+  setIssuerHasHooks(db, object.Account, 1, ledger);
+}
+
+export function applyDeletedHookObject(db: SqliteDatabase, object: HookObject, ledger: number): void {
+  if (!isValidAccount(object.Account)) {
+    return;
+  }
+  deleteHookAccount(db, object.Account);
+  setIssuerHasHooks(db, object.Account, 0, ledger);
 }
 
 export type UriTokenLiveEvent = 'mint' | 'burn' | 'transfer' | 'update';

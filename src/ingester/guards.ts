@@ -3,6 +3,7 @@ import type {
   AffectedNode,
   Amount,
   HookEntry,
+  HookObject,
   IssuedAmount,
   LedgerRemark,
   RippleStateObject,
@@ -129,7 +130,6 @@ export function parseAccountRoot(value: unknown): AccountRootObject | undefined 
     return undefined;
   }
   const remarks = parseRemarks(value.Remarks);
-  const hooks = parseHooks(value.Hook);
   const index = asString(value.index);
   const balance = asString(value.Balance);
   const flags = asNumber(value.Flags);
@@ -138,6 +138,7 @@ export function parseAccountRoot(value: unknown): AccountRootObject | undefined 
   const transferRate = asNumber(value.TransferRate);
   const regularKey = asString(value.RegularKey);
   const previousTxnLgrSeq = asNumber(value.PreviousTxnLgrSeq);
+  const hookStateCount = asNumber(value.HookStateCount);
   return {
     LedgerEntryType: 'AccountRoot',
     ...(index === undefined ? {} : { index }),
@@ -148,8 +149,30 @@ export function parseAccountRoot(value: unknown): AccountRootObject | undefined 
     ...(emailHash === undefined ? {} : { EmailHash: emailHash }),
     ...(transferRate === undefined ? {} : { TransferRate: transferRate }),
     ...(regularKey === undefined ? {} : { RegularKey: regularKey }),
-    ...(hooks === undefined ? {} : { Hook: hooks }),
     ...(remarks === undefined ? {} : { Remarks: remarks }),
+    ...(previousTxnLgrSeq === undefined ? {} : { PreviousTxnLgrSeq: previousTxnLgrSeq }),
+    ...(hookStateCount === undefined ? {} : { HookStateCount: hookStateCount }),
+  };
+}
+
+export function parseHookObject(value: unknown): HookObject | undefined {
+  if (!isRecord(value) || value.LedgerEntryType !== 'Hook') {
+    return undefined;
+  }
+  const account = asString(value.Account);
+  if (!account) {
+    return undefined;
+  }
+  const hooks = parseHooks(value.Hooks) ?? [];
+  const index = asString(value.index);
+  const flags = asNumber(value.Flags);
+  const previousTxnLgrSeq = asNumber(value.PreviousTxnLgrSeq);
+  return {
+    LedgerEntryType: 'Hook',
+    Account: account,
+    Hooks: hooks,
+    ...(index === undefined ? {} : { index }),
+    ...(flags === undefined ? {} : { Flags: flags }),
     ...(previousTxnLgrSeq === undefined ? {} : { PreviousTxnLgrSeq: previousTxnLgrSeq }),
   };
 }

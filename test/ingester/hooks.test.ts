@@ -6,6 +6,7 @@ import { closeDatabase, openDatabase, type SqliteDatabase } from '../../src/db/c
 import { getIssuer } from '../../src/db/queries/issuers.js';
 import { getToken, upsertToken } from '../../src/db/queries/tokens.js';
 import { ensureIssuer } from '../../src/db/queries/issuers.js';
+import { normalizeHookEntries } from '../../src/ingester/hooks.js';
 import { applyClosedLedger } from '../../src/ingester/ledger.js';
 import { LSF_DISABLE_MASTER } from '../../src/util/xahau.js';
 import { silentLog, sampleToken, testConfig, testRuntime } from '../helpers.js';
@@ -38,12 +39,12 @@ function hookTx(index: number, hash: string, hooks: Array<Record<string, unknown
       AffectedNodes: [
         {
           ModifiedNode: {
-            LedgerEntryType: 'AccountRoot',
+            LedgerEntryType: 'Hook',
             LedgerIndex: 'd'.repeat(64),
             FinalFields: {
               Account: ISSUER,
               Flags: 0,
-              Hook: hooks,
+              Hooks: hooks,
             },
           },
         },
@@ -51,6 +52,21 @@ function hookTx(index: number, hash: string, hooks: Array<Record<string, unknown
     },
   };
 }
+
+describe('normalizeHookEntries', () => {
+  it('keeps nested and flat hashes and drops empty slots', () => {
+    const hooks = normalizeHookEntries([
+      { Hook: { HookHash: FIRST_HOOK, HookOnIncoming: '1' } },
+      { Hook: {} },
+      { HookHash: SECOND_HOOK, HookNamespace: '0'.repeat(64) },
+    ]);
+    assert.equal(hooks.length, 2);
+    assert.equal(hooks[0]?.hook_hash, FIRST_HOOK);
+    assert.equal(hooks[0]?.hook_on_incoming, '1');
+    assert.equal(hooks[1]?.hook_hash, SECOND_HOOK);
+    assert.equal(hooks[1]?.hook_namespace, '0'.repeat(64));
+  });
+});
 
 describe('SetHook and blackhole', () => {
   it('replaces the hook array and filters by hook_hash', async () => {
@@ -87,14 +103,81 @@ describe('SetHook and blackhole', () => {
       config: testConfig(),
       runtime: testRuntime({ networkLedgerIndex: 52 }),
     });
+    const listed = await app.inject({ method: 'GET', url: '/v1/hooks' });
     const first = await app.inject({ method: 'GET', url: `/v1/hooks?hook_hash=${FIRST_HOOK}` });
     const second = await app.inject({ method: 'GET', url: `/v1/hooks?hook_hash=${SECOND_HOOK}` });
     const account = await app.inject({ method: 'GET', url: `/v1/hooks/${ISSUER}` });
+    assert.equal(listed.json().data.length, 1);
     assert.equal(first.json().data.length, 0);
     assert.equal(second.json().data.length, 1);
     assert.equal(account.json().data.hook_count, 1);
     assert.equal(account.json().data.hooks[0].hook_hash, SECOND_HOOK);
     assert.equal(account.json().data.hooks[0].hook_on_incoming, '1');
+    await app.close();
+  });
+
+  it('ignores empty Hook slots and removes the row when the Hook object is deleted', async () => {
+    const db = memoryDb();
+    applyClosedLedger(
+      db,
+      {
+        index: 51,
+        hash: '4'.repeat(64),
+        closeTime: 1_700_000_051,
+        transactions: [
+          hookTx(51, '14'.repeat(32), [
+            { Hook: { HookHash: FIRST_HOOK, HookNamespace: '0'.repeat(64) } },
+            { Hook: {} },
+            { Hook: {} },
+            { Hook: {} },
+          ]),
+        ],
+      },
+      silentLog,
+    );
+    applyClosedLedger(
+      db,
+      {
+        index: 52,
+        hash: '5'.repeat(64),
+        closeTime: 1_700_000_052,
+        transactions: [
+          {
+            hash: '15'.repeat(32),
+            TransactionType: 'SetHook',
+            Account: ISSUER,
+            meta: {
+              TransactionResult: 'tesSUCCESS',
+              AffectedNodes: [
+                {
+                  DeletedNode: {
+                    LedgerEntryType: 'Hook',
+                    LedgerIndex: 'd'.repeat(64),
+                    FinalFields: {
+                      Account: ISSUER,
+                      Hooks: [{ Hook: { HookHash: FIRST_HOOK } }],
+                    },
+                  },
+                },
+              ],
+            },
+          },
+        ],
+      },
+      silentLog,
+    );
+
+    const app = await buildApi({
+      db,
+      config: testConfig(),
+      runtime: testRuntime({ networkLedgerIndex: 52 }),
+    });
+    const listed = await app.inject({ method: 'GET', url: '/v1/hooks' });
+    const account = await app.inject({ method: 'GET', url: `/v1/hooks/${ISSUER}` });
+    const issuer = await app.inject({ method: 'GET', url: `/v1/issuers/${ISSUER}` });
+    assert.equal(listed.json().data.length, 0);
+    assert.equal(account.statusCode, 404);
+    assert.equal(issuer.json().data.has_hooks, false);
     await app.close();
   });
 
