@@ -111,6 +111,21 @@ describe('interpretRippleState', () => {
     assert.equal(view.balance, '25');
     assert.equal(view.currency, 'USD');
   });
+
+  it('canonicalizes scientific-notation balances', () => {
+    const view = interpretRippleState({
+      ...rippleState,
+      Balance: {
+        currency: 'USD',
+        issuer: 'rrrrrrrrrrrrrrrrrrrrBZbvji',
+        value: '-5296754300000000e-26',
+      },
+    } as RippleStateObject);
+    assert.ok(view);
+    assert.equal(view.issuer, ISSUER);
+    assert.equal(view.holder, HOLDER);
+    assert.equal(view.balance, '0.000000000052967543');
+  });
 });
 
 describe('runSnapshot', () => {
