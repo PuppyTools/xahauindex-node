@@ -68,7 +68,11 @@ describe('API docs', () => {
     assert.doesNotMatch(docs.body, /class="chip"/);
     assert.match(docs.body, /rPUPpkfohJsWVoXoXDbNZ7zKfk2FBB8Xwo/);
     assert.match(docs.body, /not affiliated with/);
-    assert.match(docs.body, /Xahau\/Graphics/);
+    assert.match(docs.body, /href="https:\/\/github\.com\/PuppyTools"/);
+    assert.match(docs.body, /href="https:\/\/xahau\.network"/);
+    assert.match(docs.body, /href="https:\/\/github\.com\/Xahau\/Graphics"/);
+    assert.doesNotMatch(docs.body, /\[PuppyTools\]\(/);
+    assert.doesNotMatch(docs.body, /\[Xahau\/Graphics\]\(/);
     assert.match(docs.body, /xahauindex\.dev/);
     assert.doesNotMatch(docs.body, /curl[^<]*xahauindex\.dev/);
     assert.doesNotMatch(docs.body, /Try this node/);
