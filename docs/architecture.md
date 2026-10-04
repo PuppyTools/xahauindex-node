@@ -51,7 +51,8 @@ Target: the current **validated** ledger `L`.
 
 - Request `ledger_data` with `ledger_index: L`, follow `marker`.
 - Persist `snapshot_ledger`, `snapshot_marker`, `snapshot_status=running` after every page.
-- Crash resume uses the same `L` and marker. Never jump to a newer ledger mid-snapshot.
+- Crash resume uses the same `L` and marker while that ledger is still available.
+- If the node returns `ledgerNotFound` / `lgrNotFound` for `L` (public history window expired, or a load-balanced backend dropped it), reconnect and retry. If `L` is still gone and the current validated tip has moved, wipe the incomplete snapshot tables and retarget to the new tip. Do not mix objects from two snapshot ledgers.
 - After the last page: recompute token aggregates, enqueue TOML jobs, set `live_from_ledger = L+1`, `snapshot_status=complete`.
 
 Objects consumed during snapshot:

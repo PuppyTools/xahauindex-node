@@ -33,6 +33,23 @@ export function setIndexerState(db: SqliteDatabase, key: string, value: string):
   ).run(key, value);
 }
 
+export function resetIncompleteSnapshot(db: SqliteDatabase): void {
+  if (getIndexerState(db, 'snapshot_status') === 'complete') {
+    return;
+  }
+  db.exec(`
+    DELETE FROM remarks;
+    DELETE FROM uri_token_transfers;
+    DELETE FROM uri_tokens;
+    DELETE FROM trust_lines;
+    DELETE FROM tokens;
+    DELETE FROM hook_accounts;
+    DELETE FROM issuers;
+    DELETE FROM ledgers;
+  `);
+  setIndexerState(db, 'snapshot_marker', '');
+}
+
 export function hasLedger(db: SqliteDatabase, ledgerIndex: number): boolean {
   const row = db.prepare('SELECT 1 AS ok FROM ledgers WHERE ledger_index = ?').get(ledgerIndex) as
     | { ok: number }

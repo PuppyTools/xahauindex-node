@@ -1,18 +1,19 @@
 import type { SqliteDatabase } from '../db/client.js';
 import {
   getIndexerState,
+  resetIncompleteSnapshot,
   setIndexerState,
   upsertLedger,
 } from '../db/queries/indexer.js';
 import { recomputeTokenAggregates, syncTokenIssuerFlags } from '../db/queries/tokens.js';
-import { retry } from '../util/retry.js';
+import { retry, sleep } from '../util/retry.js';
 import {
   applyCachedAccountRoots,
   applyLedgerObject,
   type AccountRootCache,
   type ApplyLogger,
 } from './objects.js';
-import type { LedgerSource } from './source.js';
+import { isLedgerNotFound, type LedgerDataPageResult, type LedgerSource } from './source.js';
 
 export interface SnapshotLogger extends ApplyLogger {
   info: (obj: Record<string, unknown>, msg: string) => void;
@@ -37,11 +38,41 @@ function decodeMarker(raw: string | undefined): unknown {
   return JSON.parse(raw) as unknown;
 }
 
+async function fetchSnapshotPage(
+  source: LedgerSource,
+  ledger: number,
+  marker: unknown,
+  log: SnapshotLogger,
+  attempts: number,
+  minMs: number,
+  signal?: AbortSignal,
+): Promise<LedgerDataPageResult> {
+  const fetch = (): Promise<LedgerDataPageResult> => source.getLedgerDataPage(ledger, marker);
+  const retryOpts = {
+    minMs,
+    maxMs: 30_000,
+    attempts,
+    ...(signal === undefined ? {} : { signal }),
+  };
+  try {
+    return await retry(fetch, retryOpts);
+  } catch (error) {
+    if (!isLedgerNotFound(error) || source.reconnect === undefined) {
+      throw error;
+    }
+    log.warn({ ledger, err: error }, 'snapshot ledger_data missing; reconnecting');
+    await source.reconnect();
+    return await retry(fetch, retryOpts);
+  }
+}
+
 export async function runSnapshot(options: {
   db: SqliteDatabase;
   source: LedgerSource;
   log: SnapshotLogger;
   pageAttempts?: number;
+  retryMinMs?: number;
+  signal?: AbortSignal;
 }): Promise<SnapshotResult> {
   const { db, source, log } = options;
   if (getIndexerState(db, 'snapshot_status') === 'complete') {
@@ -67,14 +98,60 @@ export async function runSnapshot(options: {
   let marker = decodeMarker(getIndexerState(db, 'snapshot_marker'));
   let pages = 0;
   let objects = 0;
+  let sameLedgerMisses = 0;
   const accountCache: AccountRootCache = new Map();
+  const pageAttempts = options.pageAttempts ?? 6;
+  const retryMinMs = options.retryMinMs ?? 1_000;
 
   for (;;) {
-    const page = await retry(() => source.getLedgerDataPage(snapshotLedger, marker), {
-      minMs: 1_000,
-      maxMs: 30_000,
-      attempts: options.pageAttempts ?? 6,
-    });
+    if (options.signal?.aborted) {
+      throw options.signal.reason ?? new Error('aborted');
+    }
+    let page: LedgerDataPageResult;
+    try {
+      page = await fetchSnapshotPage(
+        source,
+        snapshotLedger,
+        marker,
+        log,
+        pageAttempts,
+        retryMinMs,
+        options.signal,
+      );
+      sameLedgerMisses = 0;
+    } catch (error) {
+      if (!isLedgerNotFound(error)) {
+        throw error;
+      }
+      const tip = await source.getValidatedLedger();
+      if (tip.index !== snapshotLedger) {
+        log.warn(
+          { from: snapshotLedger, to: tip.index, err: error },
+          'snapshot ledger gone; restarting on current tip',
+        );
+        resetIncompleteSnapshot(db);
+        snapshotLedger = tip.index;
+        hash = tip.hash;
+        closeTime = tip.closeTime;
+        setIndexerState(db, 'snapshot_ledger', String(snapshotLedger));
+        setIndexerState(db, 'snapshot_hash', hash);
+        setIndexerState(db, 'snapshot_close_time', String(closeTime));
+        setIndexerState(db, 'snapshot_status', 'running');
+        marker = undefined;
+        pages = 0;
+        objects = 0;
+        sameLedgerMisses = 0;
+        accountCache.clear();
+        continue;
+      }
+      sameLedgerMisses += 1;
+      if (sameLedgerMisses >= pageAttempts) {
+        throw error;
+      }
+      log.warn({ ledger: snapshotLedger, miss: sameLedgerMisses }, 'snapshot ledger still missing; retrying');
+      await sleep(retryMinMs, options.signal);
+      continue;
+    }
     const apply = db.transaction(() => {
       for (const item of page.state) {
         applyLedgerObject(db, item, snapshotLedger, log, accountCache);

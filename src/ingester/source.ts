@@ -21,6 +21,7 @@ export interface ClosedLedger {
 export interface LedgerSource {
   getValidatedLedger(): Promise<ValidatedLedger>;
   getLedgerDataPage(ledgerIndex: number, marker?: unknown): Promise<LedgerDataPageResult>;
+  reconnect?(): Promise<void>;
 }
 
 export interface LiveLedgerSource extends LedgerSource {
@@ -45,6 +46,29 @@ function asLedgerRecord(value: unknown): Record<string, unknown> {
 function isHttpUrl(url: string): boolean {
   const protocol = new URL(url).protocol;
   return protocol === 'http:' || protocol === 'https:';
+}
+
+export function isLedgerNotFound(error: unknown): boolean {
+  const texts: string[] = [];
+  if (error instanceof Error) {
+    texts.push(error.message);
+  }
+  if (typeof error === 'object' && error !== null) {
+    const record = error as { name?: unknown; data?: unknown };
+    if (typeof record.name === 'string') {
+      texts.push(record.name);
+    }
+    if (typeof record.data === 'object' && record.data !== null) {
+      const data = record.data as { error?: unknown; error_message?: unknown };
+      if (typeof data.error === 'string') {
+        texts.push(data.error);
+      }
+      if (typeof data.error_message === 'string') {
+        texts.push(data.error_message);
+      }
+    }
+  }
+  return texts.some((text) => /lgrNotFound|ledgerNotFound/i.test(text));
 }
 
 export function createJsonRpcSource(url: string): XahauSource {
@@ -93,6 +117,7 @@ export function createJsonRpcSource(url: string): XahauSource {
   return {
     connect: async () => undefined,
     disconnect: async () => undefined,
+    reconnect: async () => undefined,
     getValidatedLedger: async () => {
       const ledger = await requestLedger('validated');
       return { index: ledger.index, hash: ledger.hash, closeTime: ledger.closeTime };
@@ -139,6 +164,14 @@ export function createXahauSource(url: string): XahauSource {
       listeners.clear();
       await client.disconnect();
     },
+    reconnect: async () => {
+      try {
+        await client.disconnect();
+      } catch {
+        // already closed
+      }
+      await client.connect();
+    },
     getValidatedLedger: async () => {
       const response = await client.request({
         command: 'ledger',
@@ -159,7 +192,7 @@ export function createXahauSource(url: string): XahauSource {
         command: 'ledger_data',
         ledger_index: ledgerIndex,
         binary: false,
-        limit: 200,
+        limit: 1024,
       };
       if (marker !== undefined) {
         request.marker = marker;

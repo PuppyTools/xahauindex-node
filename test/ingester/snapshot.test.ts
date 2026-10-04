@@ -3,14 +3,15 @@ import { afterEach, describe, it } from 'node:test';
 
 import { buildApi } from '../../src/api/index.js';
 import { closeDatabase, openDatabase, type SqliteDatabase } from '../../src/db/client.js';
-import { getIndexerState } from '../../src/db/queries/indexer.js';
-import { getToken } from '../../src/db/queries/tokens.js';
+import { getIndexerState, setIndexerState } from '../../src/db/queries/indexer.js';
+import { getToken, upsertToken } from '../../src/db/queries/tokens.js';
+import { upsertIssuer } from '../../src/db/queries/issuers.js';
 import { getUriToken } from '../../src/db/queries/uritokens.js';
 import { interpretRippleState } from '../../src/ingester/objects.js';
 import { runSnapshot } from '../../src/ingester/snapshot.js';
 import type { LedgerSource } from '../../src/ingester/source.js';
 import type { RippleStateObject } from '../../src/types/xahau.js';
-import { silentLog, testConfig, testRuntime } from '../helpers.js';
+import { sampleIssuer, sampleToken, silentLog, testConfig, testRuntime } from '../helpers.js';
 
 const ISSUER = 'rHb9CJAWyB4rj91VRWn96DkukG4bwdtyTh';
 const HOLDER = 'rPT1Sjq2YGrBMTttX4GZHjKu9dyfzbpAYe';
@@ -207,5 +208,73 @@ describe('runSnapshot', () => {
     assert.equal(result.skipped, false);
     assert.ok(getUriToken(db, URI_ID));
     assert.equal(getIndexerState(db, 'snapshot_status'), 'complete');
+  });
+
+  it('retries ledgerNotFound on the same ledger without retargeting', async () => {
+    const db = memoryDb();
+    let calls = 0;
+    const source: LedgerSource = {
+      getValidatedLedger: async () => ({
+        index: 7,
+        hash: '3'.repeat(64),
+        closeTime: 1_700_000_007,
+      }),
+      getLedgerDataPage: async () => {
+        calls += 1;
+        if (calls === 1) {
+          throw Object.assign(new Error('ledgerNotFound'), { data: { error: 'lgrNotFound' } });
+        }
+        return { state: [rippleState] };
+      },
+    };
+    const result = await runSnapshot({
+      db,
+      source,
+      log: silentLog,
+      pageAttempts: 3,
+      retryMinMs: 1,
+    });
+    assert.equal(result.ledger, 7);
+    assert.equal(result.pages, 1);
+    assert.ok(getToken(db, `USD:${ISSUER}`));
+    assert.equal(getIndexerState(db, 'snapshot_status'), 'complete');
+  });
+
+  it('retargets to the current tip when the snapshot ledger is gone', async () => {
+    const db = memoryDb();
+    setIndexerState(db, 'snapshot_status', 'running');
+    setIndexerState(db, 'snapshot_ledger', '10');
+    setIndexerState(db, 'snapshot_hash', '1'.repeat(64));
+    setIndexerState(db, 'snapshot_close_time', '1700000100');
+    upsertIssuer(db, sampleIssuer());
+    upsertToken(db, sampleToken());
+
+    const source: LedgerSource = {
+      getValidatedLedger: async () => ({
+        index: 20,
+        hash: '2'.repeat(64),
+        closeTime: 1_700_000_200,
+      }),
+      getLedgerDataPage: async (index) => {
+        if (index === 10) {
+          throw Object.assign(new Error('ledgerNotFound'), { data: { error: 'lgrNotFound' } });
+        }
+        return { state: [uriToken] };
+      },
+    };
+
+    const result = await runSnapshot({
+      db,
+      source,
+      log: silentLog,
+      pageAttempts: 1,
+      retryMinMs: 1,
+    });
+    assert.equal(result.skipped, false);
+    assert.equal(result.ledger, 20);
+    assert.equal(getIndexerState(db, 'snapshot_ledger'), '20');
+    assert.equal(getIndexerState(db, 'snapshot_status'), 'complete');
+    assert.equal(getToken(db, `USD:${ISSUER}`), undefined);
+    assert.ok(getUriToken(db, URI_ID));
   });
 });

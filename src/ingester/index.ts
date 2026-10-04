@@ -31,6 +31,7 @@ export async function startIngester(options: {
       db: options.db,
       source,
       log: options.log,
+      ...(options.signal === undefined ? {} : { signal: options.signal }),
     });
     if (options.runtime.networkLedgerIndex === null) {
       options.runtime.networkLedgerIndex = result.ledger;
