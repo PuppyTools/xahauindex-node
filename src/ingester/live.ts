@@ -1,6 +1,7 @@
 import type { SqliteDatabase } from '../db/client.js';
 import { getIndexerState, getLatestLedgerIndex } from '../db/queries/indexer.js';
 import type { Runtime } from '../runtime.js';
+import { withQuota } from '../util/quota.js';
 import { retry } from '../util/retry.js';
 import { applyClosedLedger, snapshotLedgerBound, type ApplyClosedLedgerResult } from './ledger.js';
 import type { ApplyLogger } from './objects.js';
@@ -23,7 +24,7 @@ function nextLedgerToApply(db: SqliteDatabase): number {
 
 export async function catchUpLedgers(options: {
   db: SqliteDatabase;
-  source: Pick<LiveLedgerSource, 'getLedgerWithTransactions'>;
+  source: Pick<LiveLedgerSource, 'getLedgerWithTransactions' | 'quota'>;
   log: LiveLogger;
   through: number;
   signal?: AbortSignal;
@@ -33,33 +34,47 @@ export async function catchUpLedgers(options: {
   const { db, source, log, through } = options;
   const applied: ApplyClosedLedgerResult[] = [];
   let index = nextLedgerToApply(db);
-  while (index <= through) {
-    if (options.signal?.aborted) {
-      throw options.signal.reason ?? new Error('aborted');
-    }
-    const ledger: ClosedLedger = await retry(() => source.getLedgerWithTransactions(index), {
-      minMs: options.retryMinMs ?? 1_000,
-      maxMs: 60_000,
-      ...(options.signal === undefined ? {} : { signal: options.signal }),
-      onRetry: ({ error, waitMs, rateLimited }) => {
-        if (rateLimited) {
-          log.warn({ err: error, ledger: index, waitMs }, 'live ledger fetch rate-limited, waiting');
-        }
-      },
-    });
-    const result = applyClosedLedger(db, ledger, log);
-    applied.push(result);
-    if (result.applied) {
-      options.onApplied?.(result);
-      log.info(
-        { ledger: result.index, txApplied: result.txApplied, tokensTouched: result.tokensTouched },
-        'live ledger applied',
+  source.quota?.beginLive();
+  try {
+    while (index <= through) {
+      if (options.signal?.aborted) {
+        throw options.signal.reason ?? new Error('aborted');
+      }
+      const ledger: ClosedLedger = await retry(
+        () =>
+          withQuota(
+            source.quota,
+            'live',
+            () => source.getLedgerWithTransactions(index),
+            options.signal,
+          ),
+        {
+          minMs: options.retryMinMs ?? 1_000,
+          maxMs: 60_000,
+          ...(options.signal === undefined ? {} : { signal: options.signal }),
+          onRetry: ({ waitMs, rateLimited }) => {
+            if (rateLimited) {
+              log.warn({ ledger: index, waitMs }, 'live ledger fetch rate-limited, waiting');
+            }
+          },
+        },
       );
+      const result = applyClosedLedger(db, ledger, log);
+      applied.push(result);
+      if (result.applied) {
+        options.onApplied?.(result);
+        log.info(
+          { ledger: result.index, txApplied: result.txApplied, tokensTouched: result.tokensTouched },
+          'live ledger applied',
+        );
+      }
+      index = nextLedgerToApply(db);
+      if (result.skipped && index === ledger.index) {
+        index = ledger.index + 1;
+      }
     }
-    index = nextLedgerToApply(db);
-    if (result.skipped && index === ledger.index) {
-      index = ledger.index + 1;
-    }
+  } finally {
+    source.quota?.endLive();
   }
   return applied;
 }
@@ -92,17 +107,20 @@ export async function followLive(options: {
 }): Promise<void> {
   const { db, source, runtime, log } = options;
   const retryMinMs = options.retryMinMs ?? 1_000;
-  const tip = await retry(() => source.getValidatedLedger(), {
-    minMs: retryMinMs,
-    maxMs: 60_000,
-    ...(options.signal === undefined ? {} : { signal: options.signal }),
-    onRetry: ({ error, waitMs, rateLimited }) => {
-      log.warn(
-        { err: error, waitMs, rateLimited },
-        rateLimited ? 'live tip fetch rate-limited, waiting' : 'live tip fetch retrying',
-      );
+  const tip = await retry(
+    () => withQuota(source.quota, 'live', () => source.getValidatedLedger(), options.signal),
+    {
+      minMs: retryMinMs,
+      maxMs: 60_000,
+      ...(options.signal === undefined ? {} : { signal: options.signal }),
+      onRetry: ({ waitMs, rateLimited }) => {
+        log.warn(
+          { waitMs, rateLimited },
+          rateLimited ? 'live tip fetch rate-limited, waiting' : 'live tip fetch retrying',
+        );
+      },
     },
-  });
+  );
   runtime.networkLedgerIndex = tip.index;
   const appliedOpts = {
     db,
@@ -117,17 +135,20 @@ export async function followLive(options: {
     through: tip.index,
   });
 
-  await retry(() => source.subscribeLedgers(), {
-    minMs: retryMinMs,
-    maxMs: 60_000,
-    ...(options.signal === undefined ? {} : { signal: options.signal }),
-    onRetry: ({ error, waitMs, rateLimited }) => {
-      log.warn(
-        { err: error, waitMs, rateLimited },
-        rateLimited ? 'live subscribe rate-limited, waiting' : 'live subscribe retrying',
-      );
+  await retry(
+    () => withQuota(source.quota, 'live', () => source.subscribeLedgers(), options.signal),
+    {
+      minMs: retryMinMs,
+      maxMs: 60_000,
+      ...(options.signal === undefined ? {} : { signal: options.signal }),
+      onRetry: ({ waitMs, rateLimited }) => {
+        log.warn(
+          { waitMs, rateLimited },
+          rateLimited ? 'live subscribe rate-limited, waiting' : 'live subscribe retrying',
+        );
+      },
     },
-  });
+  );
   const queue = new SerialQueue();
 
   const handleClosed = (closed: ValidatedLedger): void => {

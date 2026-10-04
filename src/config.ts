@@ -152,7 +152,7 @@ function readOptionalNonNegativeInt(env: NodeJS.ProcessEnv, key: string): number
   return value;
 }
 
-export const SHARED_BACKFILL_INTERVAL_MS = 400;
+export const SHARED_BACKFILL_INTERVAL_MS = 2_000;
 
 function readOptionalPositiveInt(env: NodeJS.ProcessEnv, key: string): number | null {
   const raw = env[key];

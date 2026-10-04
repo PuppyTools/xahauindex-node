@@ -100,7 +100,7 @@ export async function startIngester(options: {
 
 export async function runDedicatedBackfill(options: {
   db: SqliteDatabase;
-  liveSource: Pick<XahauSource, 'getLedgerWithTransactions'>;
+  liveSource: Pick<XahauSource, 'getLedgerWithTransactions' | 'quota'>;
   config: Config;
   log: LiveLogger;
   signal?: AbortSignal;

@@ -1,6 +1,7 @@
 import { resolveBackfillFrom, type Config } from '../config.js';
 import type { SqliteDatabase } from '../db/client.js';
 import { getIndexerState, setIndexerState } from '../db/queries/indexer.js';
+import { withQuota } from '../util/quota.js';
 import { retry, sleep } from '../util/retry.js';
 import { applyHistoricalLedger } from './ledger.js';
 import type { LiveLogger } from './live.js';
@@ -84,7 +85,7 @@ export function resumeBackfillIndex(options: {
 
 export async function runBackfill(options: {
   db: SqliteDatabase;
-  source: Pick<LiveLedgerSource, 'getLedgerWithTransactions'>;
+  source: Pick<LiveLedgerSource, 'getLedgerWithTransactions' | 'quota'>;
   config: Config;
   log: LiveLogger;
   signal?: AbortSignal;
@@ -156,17 +157,26 @@ export async function runBackfill(options: {
     }
     let ledger: ClosedLedger;
     try {
-      ledger = await retry(() => source.getLedgerWithTransactions(index), {
-        minMs: options.retryMinMs ?? 1_000,
-        maxMs: 30_000,
-        attempts: options.fetchAttempts ?? 6,
-        ...(options.signal === undefined ? {} : { signal: options.signal }),
-        onRetry: ({ error, waitMs, rateLimited }) => {
-          if (rateLimited) {
-            log.warn({ err: error, ledger: index, waitMs }, 'historical backfill rate-limited, waiting');
-          }
+      ledger = await retry(
+        () =>
+          withQuota(
+            source.quota,
+            'backfill',
+            () => source.getLedgerWithTransactions(index),
+            options.signal,
+          ),
+        {
+          minMs: options.retryMinMs ?? 1_000,
+          maxMs: 30_000,
+          attempts: options.fetchAttempts ?? 6,
+          ...(options.signal === undefined ? {} : { signal: options.signal }),
+          onRetry: ({ waitMs, rateLimited }) => {
+            if (rateLimited) {
+              log.warn({ ledger: index, waitMs }, 'historical backfill rate-limited, waiting');
+            }
+          },
         },
-      });
+      );
     } catch (error) {
       if (options.signal?.aborted) {
         throw options.signal.reason ?? error;

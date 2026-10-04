@@ -1,5 +1,7 @@
 import { Client, rippleTimeToUnixTime, type LedgerStream } from '@transia/xrpl';
 
+import { NodeQuota } from '../util/quota.js';
+
 export interface ValidatedLedger {
   index: number;
   hash: string;
@@ -28,6 +30,7 @@ export interface LiveLedgerSource extends LedgerSource {
   getLedgerWithTransactions(ledgerIndex: number): Promise<ClosedLedger>;
   subscribeLedgers(): Promise<void>;
   onLedgerClosed(handler: (ledger: ValidatedLedger) => void): () => void;
+  quota?: NodeQuota;
 }
 
 export interface XahauSource extends LiveLedgerSource {
@@ -115,6 +118,7 @@ export function createJsonRpcSource(url: string): XahauSource {
   };
 
   return {
+    quota: new NodeQuota(),
     connect: async () => undefined,
     disconnect: async () => undefined,
     reconnect: async () => undefined,
@@ -142,6 +146,7 @@ export function createBackfillSource(url: string): XahauSource {
 
 export function createXahauSource(url: string): XahauSource {
   const client = new Client(url);
+  const quota = new NodeQuota();
   const listeners = new Set<(ledger: ValidatedLedger) => void>();
 
   const onClosed = (ledger: LedgerStream): void => {
@@ -156,6 +161,7 @@ export function createXahauSource(url: string): XahauSource {
   };
 
   return {
+    quota,
     connect: async () => {
       await client.connect();
     },
