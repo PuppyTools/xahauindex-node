@@ -50,11 +50,11 @@ export function upsertIssuer(db: SqliteDatabase, row: IssuerRow): void {
     `
     INSERT INTO issuers (
       account, domain, domain_verified, email_hash, transfer_rate, flags,
-      blackholed, toml_name, toml_description, toml_icon_url, toml_raw,
+      blackholed, toml_name, toml_description, toml_icon_url, toml_links, toml_raw,
       toml_checked_ledger, has_hooks, first_ledger, last_updated
     ) VALUES (
       @account, @domain, @domain_verified, @email_hash, @transfer_rate, @flags,
-      @blackholed, @toml_name, @toml_description, @toml_icon_url, @toml_raw,
+      @blackholed, @toml_name, @toml_description, @toml_icon_url, @toml_links, @toml_raw,
       @toml_checked_ledger, @has_hooks, @first_ledger, @last_updated
     )
     ON CONFLICT(account) DO UPDATE SET
@@ -67,6 +67,7 @@ export function upsertIssuer(db: SqliteDatabase, row: IssuerRow): void {
       toml_name = excluded.toml_name,
       toml_description = excluded.toml_description,
       toml_icon_url = excluded.toml_icon_url,
+      toml_links = excluded.toml_links,
       toml_raw = excluded.toml_raw,
       toml_checked_ledger = excluded.toml_checked_ledger,
       has_hooks = excluded.has_hooks,
@@ -84,6 +85,7 @@ export function updateIssuerToml(
     | 'toml_name'
     | 'toml_description'
     | 'toml_icon_url'
+    | 'toml_links'
     | 'toml_raw'
     | 'toml_checked_ledger'
   >,
@@ -95,6 +97,7 @@ export function updateIssuerToml(
       toml_name = @toml_name,
       toml_description = @toml_description,
       toml_icon_url = @toml_icon_url,
+      toml_links = @toml_links,
       toml_raw = @toml_raw,
       toml_checked_ledger = @toml_checked_ledger
     WHERE account = @account
@@ -110,11 +113,13 @@ export function invalidateIssuerToml(db: SqliteDatabase, account: string): void 
       toml_name = NULL,
       toml_description = NULL,
       toml_icon_url = NULL,
+      toml_links = NULL,
       toml_raw = NULL,
       toml_checked_ledger = NULL
     WHERE account = ?
     `,
   ).run(account);
+  db.prepare('UPDATE tokens SET toml_links = NULL WHERE issuer = ?').run(account);
 }
 
 export function listIssuersDueForToml(
@@ -125,10 +130,12 @@ export function listIssuersDueForToml(
   return db
     .prepare(
       `
-      SELECT * FROM issuers
+      SELECT issuers.* FROM issuers
       WHERE domain IS NOT NULL AND domain != ''
         AND (toml_checked_ledger IS NULL OR (? - toml_checked_ledger) >= ?)
-      ORDER BY account ASC
+      ORDER BY
+        CASE WHEN EXISTS (SELECT 1 FROM tokens WHERE tokens.issuer = issuers.account) THEN 0 ELSE 1 END,
+        account ASC
       `,
     )
     .all(ledger, interval) as IssuerRow[];

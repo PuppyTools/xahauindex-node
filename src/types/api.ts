@@ -42,6 +42,12 @@ export interface Status {
 
 export type RemarksMap = Record<string, string>;
 
+export interface TomlLink {
+  url: string;
+  type: string | null;
+  title: string | null;
+}
+
 export interface Token {
   id: string;
   currency: string;
@@ -51,6 +57,7 @@ export interface Token {
   description: string | null;
   icon_url: string | null;
   website_url: string | null;
+  toml_links: TomlLink[];
   supply: string | null;
   holder_count: number;
   trust_count: number;
@@ -80,6 +87,7 @@ export interface Issuer {
   toml_name: string | null;
   toml_description: string | null;
   toml_icon_url: string | null;
+  toml_links: TomlLink[];
   has_hooks: boolean;
   token_count?: number;
   first_ledger: number;

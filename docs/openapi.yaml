@@ -173,6 +173,20 @@ components:
         type: string
       description: Decoded remark name/value map
 
+    TomlLink:
+      type: object
+      required: [url]
+      properties:
+        url:
+          type: string
+        type:
+          type: string
+          nullable: true
+          description: Normalized kind (`website`, `social`, or the TOML type)
+        title:
+          type: string
+          nullable: true
+
     Token:
       type: object
       required: [id, currency, issuer, holder_count, trust_count, domain_verified, blackholed, first_ledger]
@@ -202,6 +216,10 @@ components:
         website_url:
           type: string
           nullable: true
+        toml_links:
+          type: array
+          items:
+            $ref: '#/components/schemas/TomlLink'
         supply:
           type: string
           nullable: true
@@ -370,6 +388,10 @@ components:
         toml_icon_url:
           type: string
           nullable: true
+        toml_links:
+          type: array
+          items:
+            $ref: '#/components/schemas/TomlLink'
         has_hooks:
           type: boolean
         token_count:

@@ -117,7 +117,7 @@ Well-known keys (`name`, `description`, `image`, `icon`, `website`, `attributes`
 
 ### Issuers + TOML
 
-`account_info` → Domain hex (printable hostname only) → `https://<domain>/.well-known/xrp-ledger.toml`. Hex blobs and non-hostnames are stored if printable but never fetched. Verified if the r-address appears in `[[ACCOUNTS]]`. Re-check ~every 1000 ledgers and on Domain-changing `AccountSet`. Expected fetch misses (NXDOMAIN, timeout, 404, bad cert) are debug; a pass summary is info.
+`account_info` → Domain hex (printable hostname only) → `https://<domain>/.well-known/xrp-ledger.toml`. Hex blobs and non-hostnames are stored if printable but never fetched. Verified if the r-address appears in `[[ACCOUNTS]]`, `[[ISSUERS]]`, or `[[TOKENS]]`. Re-check ~every 1000 ledgers and on Domain-changing `AccountSet`. Token issuers are checked before host-only domains. Expected fetch misses (NXDOMAIN, timeout, 404, bad cert, Cloudflare 403 without a document) are debug; a pass summary is info. Fetches send a product User-Agent so Cloudflare-backed sites can serve the file.
 
 HTTPS only, timeout, size cap, no private-IP redirects.
 
@@ -125,7 +125,7 @@ HTTPS only, timeout, size cap, no private-IP redirects.
 
 ### Icons
 
-The API returns `icon_url` / `toml_icon_url` strings. Sources: on-ledger remarks (`image` / `icon` / `icon_url`), issuer TOML `icon` (copied onto tokens that have no icon), and optional HTTPS fetch of a URIToken `uri` when it is JSON metadata. If the URI itself looks like an image, that URI is stored. When the URI is a JSON metadata document, the parsed JSON is stored on the URIToken as `metadata`. Image bytes are never downloaded for storage or proxied. `data:` URIs are discarded.
+The API returns `icon_url` / `toml_icon_url` strings and `toml_links` (`url`, `type`, `title`). Sources: on-ledger remarks (`image` / `icon` / `icon_url` / `website`), issuer TOML `icon`, `[[WEBLINKS]]` / `[[TOKENS.WEBLINKS]]` / `[[TOKENS.URLS]]`, and `[ORGANIZATION]` website/twitter. Token `website_url` is filled from the first website link when empty. Image bytes are never downloaded for storage or proxied. `data:` URIs are discarded. When a URIToken URI is HTTPS JSON metadata, that JSON is stored on the token as `metadata`.
 
 ### DEX
 
@@ -231,6 +231,7 @@ CREATE TABLE issuers (
   toml_name         TEXT,
   toml_description  TEXT,
   toml_icon_url     TEXT,
+  toml_links        TEXT,
   toml_raw          TEXT,
   has_hooks         INTEGER NOT NULL DEFAULT 0,
   first_ledger      INTEGER NOT NULL,

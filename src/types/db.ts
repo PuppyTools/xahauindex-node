@@ -22,6 +22,7 @@ export interface TokenRow {
   description: string | null;
   icon_url: string | null;
   website_url: string | null;
+  toml_links: string | null;
   supply: string | null;
   holder_count: number;
   trust_count: number;
@@ -56,6 +57,7 @@ export interface IssuerRow {
   toml_name: string | null;
   toml_description: string | null;
   toml_icon_url: string | null;
+  toml_links: string | null;
   toml_raw: string | null;
   toml_checked_ledger: number | null;
   has_hooks: SqliteBool;

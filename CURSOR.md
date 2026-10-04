@@ -59,7 +59,7 @@ src/
     hooks.ts        — Hook state tracking
     remarks.ts      — Remarks decoder + SetRemarks apply
     metadata.ts     — URI metadata JSON → icon URL (no image bytes)
-    issuers.ts      — issuer profile + domain TOML verification
+    issuers.ts      — issuer profile + domain TOML (ACCOUNTS / ISSUERS / TOKENS)
     dex.ts          — DEX executions → OHLCV candles
   api/
     index.ts        — Fastify plugin registration

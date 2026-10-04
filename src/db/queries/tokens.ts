@@ -69,6 +69,30 @@ export function fillTokenIconsFromIssuer(
   ).run({ issuer, icon });
 }
 
+export function fillTokenTomlFromIssuer(
+  db: SqliteDatabase,
+  issuer: string,
+  linksJson: string | null,
+  websiteUrl: string | null,
+): void {
+  db.prepare(
+    `
+    UPDATE tokens SET toml_links = @links
+    WHERE issuer = @issuer
+    `,
+  ).run({ issuer, links: linksJson });
+  const website = normalizeIconUrl(websiteUrl);
+  if (!website) {
+    return;
+  }
+  db.prepare(
+    `
+    UPDATE tokens SET website_url = @website
+    WHERE issuer = @issuer AND (website_url IS NULL OR website_url = '')
+    `,
+  ).run({ issuer, website });
+}
+
 export function syncTokenIssuerFlags(db: SqliteDatabase, issuer?: string): void {
   if (issuer === undefined) {
     db.exec(`

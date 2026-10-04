@@ -1,11 +1,11 @@
 import type { SqliteDatabase } from '../db/client.js';
-import { getLatestLedgerIndex } from '../db/queries/indexer.js';
+import { getIndexerState, getLatestLedgerIndex, setIndexerState } from '../db/queries/indexer.js';
 import {
   getIssuer,
   listIssuersDueForToml,
   updateIssuerToml,
 } from '../db/queries/issuers.js';
-import { fillTokenIconsFromIssuer, syncTokenIssuerFlags } from '../db/queries/tokens.js';
+import { fillTokenIconsFromIssuer, fillTokenTomlFromIssuer, syncTokenIssuerFlags } from '../db/queries/tokens.js';
 import type { IssuerRow } from '../types/db.js';
 import {
   fetchXrpLedgerToml,
@@ -13,12 +13,17 @@ import {
   isExpectedTomlFailure,
   isFetchableTomlDomain,
   parseXrpLedgerToml,
+  pickTomlLinks,
   pickTomlProfile,
+  serializeTomlLinks,
+  websiteFromTomlLinks,
 } from '../util/domain.js';
 import { sleep } from '../util/retry.js';
 import type { LiveLogger } from './live.js';
 
 export const TOML_REVERIFY_LEDGERS = 1000;
+export const TOML_LOGIC_VERSION = '2';
+export const TOML_PASS_CONCURRENCY = 6;
 
 export type TomlLoader = (domain: string) => Promise<string>;
 
@@ -50,6 +55,7 @@ export async function verifyIssuerToml(options: {
       toml_name: issuer.toml_name,
       toml_description: issuer.toml_description,
       toml_icon_url: issuer.toml_icon_url,
+      toml_links: issuer.toml_links,
       toml_raw: issuer.toml_raw,
       toml_checked_ledger: options.ledger,
     });
@@ -66,17 +72,21 @@ export async function verifyIssuerToml(options: {
     const toml = parseXrpLedgerToml(raw);
     const verified = isAccountListed(toml, issuer.account);
     const profile = pickTomlProfile(toml, issuer.account);
+    const links = pickTomlLinks(toml);
+    const linksJson = serializeTomlLinks(links);
     updateIssuerToml(options.db, {
       account: issuer.account,
       domain_verified: verified ? 1 : 0,
       toml_name: profile.name ?? null,
       toml_description: profile.description ?? null,
       toml_icon_url: profile.icon ?? null,
+      toml_links: linksJson,
       toml_raw: raw,
       toml_checked_ledger: options.ledger,
     });
     syncTokenIssuerFlags(options.db, issuer.account);
     fillTokenIconsFromIssuer(options.db, issuer.account, profile.icon ?? null);
+    fillTokenTomlFromIssuer(options.db, issuer.account, linksJson, websiteFromTomlLinks(links));
     if (!verified) {
       options.log.warn({ account: issuer.account, domain: issuer.domain }, 'TOML did not list issuer');
     } else {
@@ -90,6 +100,7 @@ export async function verifyIssuerToml(options: {
       toml_name: issuer.toml_name,
       toml_description: issuer.toml_description,
       toml_icon_url: issuer.toml_icon_url,
+      toml_links: issuer.toml_links,
       toml_raw: issuer.toml_raw,
       toml_checked_ledger: options.ledger,
     });
@@ -110,29 +121,53 @@ export async function verifyIssuerToml(options: {
   }
 }
 
+export function requeueUnverifiedTokenIssuers(db: SqliteDatabase): number {
+  if (getIndexerState(db, 'toml_logic_version') === TOML_LOGIC_VERSION) {
+    return 0;
+  }
+  const result = db
+    .prepare(
+      `
+      UPDATE issuers SET toml_checked_ledger = NULL
+      WHERE domain_verified = 0
+        AND domain IS NOT NULL AND domain != ''
+        AND EXISTS (SELECT 1 FROM tokens WHERE tokens.issuer = issuers.account)
+      `,
+    )
+    .run();
+  setIndexerState(db, 'toml_logic_version', TOML_LOGIC_VERSION);
+  return result.changes;
+}
+
 export async function runTomlPass(options: {
   db: SqliteDatabase;
   ledger: number;
   loader?: TomlLoader;
   log: Pick<LiveLogger, 'warn' | 'info' | 'debug'>;
   interval?: number;
+  concurrency?: number;
   signal?: AbortSignal;
 }): Promise<TomlVerifyResult[]> {
   const due = listIssuersDueForToml(options.db, options.ledger, options.interval ?? TOML_REVERIFY_LEDGERS);
   const results: TomlVerifyResult[] = [];
-  for (const issuer of due) {
+  const concurrency = Math.max(1, options.concurrency ?? TOML_PASS_CONCURRENCY);
+  for (let i = 0; i < due.length; i += concurrency) {
     if (options.signal?.aborted) {
       break;
     }
-    results.push(
-      await verifyIssuerToml({
-        db: options.db,
-        account: issuer.account,
-        ledger: options.ledger,
-        log: options.log,
-        ...(options.loader === undefined ? {} : { loader: options.loader }),
-      }),
+    const chunk = due.slice(i, i + concurrency);
+    const chunkResults = await Promise.all(
+      chunk.map((issuer) =>
+        verifyIssuerToml({
+          db: options.db,
+          account: issuer.account,
+          ledger: options.ledger,
+          log: options.log,
+          ...(options.loader === undefined ? {} : { loader: options.loader }),
+        }),
+      ),
     );
+    results.push(...chunkResults);
   }
   if (due.length > 0) {
     options.log.info(
@@ -156,6 +191,10 @@ export async function runTomlWorker(options: {
   pollMs?: number;
 }): Promise<void> {
   const pollMs = options.pollMs ?? 2_000;
+  const requeued = requeueUnverifiedTokenIssuers(options.db);
+  if (requeued > 0) {
+    options.log.info({ requeued, version: TOML_LOGIC_VERSION }, 'requeued unverified token issuers for TOML');
+  }
   while (options.signal === undefined || !options.signal.aborted) {
     try {
       await runTomlPass({

@@ -5,7 +5,7 @@ import { closeDatabase, openDatabase, type SqliteDatabase } from '../../src/db/c
 import { getIssuer, listIssuersDueForToml, upsertIssuer } from '../../src/db/queries/issuers.js';
 import { getToken, upsertToken } from '../../src/db/queries/tokens.js';
 import { applyClosedLedger } from '../../src/ingester/ledger.js';
-import { runTomlPass, verifyIssuerToml } from '../../src/ingester/toml.js';
+import { requeueUnverifiedTokenIssuers, runTomlPass, verifyIssuerToml } from '../../src/ingester/toml.js';
 import { silentLog, sampleIssuer, sampleToken } from '../helpers.js';
 
 const ISSUER = 'rHb9CJAWyB4rj91VRWn96DkukG4bwdtyTh';
@@ -34,6 +34,16 @@ icon = "https://example.com/icon.png"
 [[ACCOUNTS]]
 address = "${account}"
 name = "Treasury"
+
+[[WEBLINKS]]
+url = "https://example.com"
+type = "website"
+title = "Site"
+
+[[WEBLINKS]]
+url = "https://x.com/example"
+type = "socialmedia"
+title = "X"
 `;
 }
 
@@ -57,8 +67,18 @@ describe('TOML verification', () => {
     assert.equal(verified.toml_name, 'Treasury');
     assert.equal(verified.toml_icon_url, 'https://example.com/icon.png');
     assert.equal(verified.toml_checked_ledger, 100);
-    assert.equal(getToken(db, `USD:${ISSUER}`)?.domain_verified, 1);
-    assert.equal(getToken(db, `USD:${ISSUER}`)?.icon_url, 'https://example.com/icon.png');
+    assert.equal(
+      verified.toml_links,
+      JSON.stringify([
+        { url: 'https://example.com', type: 'website', title: 'Site' },
+        { url: 'https://x.com/example', type: 'social', title: 'X' },
+      ]),
+    );
+    const token = getToken(db, `USD:${ISSUER}`);
+    assert.equal(token?.domain_verified, 1);
+    assert.equal(token?.icon_url, 'https://example.com/icon.png');
+    assert.equal(token?.website_url, 'https://example.com');
+    assert.equal(token?.toml_links, verified.toml_links);
 
     const missing = await verifyIssuerToml({
       db,
@@ -149,6 +169,48 @@ describe('TOML verification', () => {
     assert.equal(afterDomain.domain_verified, 0);
     assert.equal(afterDomain.toml_checked_ledger, null);
     assert.equal(listIssuersDueForToml(db, 1200).length, 1);
+  });
+
+  it('verifies issuers listed only under ISSUERS', async () => {
+    const db = memoryDb();
+    upsertIssuer(db, sampleIssuer());
+    const ok = await verifyIssuerToml({
+      db,
+      account: ISSUER,
+      ledger: 80,
+      log: silentLog,
+      loader: async () => `
+[[ISSUERS]]
+address = "${ISSUER}"
+name = "Xspence"
+`,
+    });
+    assert.equal(ok.verified, true);
+    assert.equal(getIssuer(db, ISSUER)?.toml_name, 'Xspence');
+  });
+
+  it('checks token issuers before host-only domains and requeues after a logic bump', async () => {
+    const db = memoryDb();
+    const host = 'r44E6yrTudryFYeZ62JP2GZTwcXvDhJg6E';
+    upsertIssuer(db, { ...sampleIssuer(host), domain: 'node.evernode.example', toml_checked_ledger: 10 });
+    upsertIssuer(db, { ...sampleIssuer(), toml_checked_ledger: 10 });
+    upsertToken(db, sampleToken());
+
+    const dueBefore = listIssuersDueForToml(db, 10, 1000);
+    assert.equal(dueBefore.length, 0);
+
+    const requeued = requeueUnverifiedTokenIssuers(db);
+    assert.equal(requeued, 1);
+    assert.equal(requeueUnverifiedTokenIssuers(db), 0);
+
+    const due = listIssuersDueForToml(db, 20, 1000);
+    assert.equal(due[0]?.account, ISSUER);
+    assert.equal(due.length, 1);
+
+    upsertIssuer(db, { ...sampleIssuer(host), domain: 'node.evernode.example', toml_checked_ledger: null });
+    const ordered = listIssuersDueForToml(db, 20, 1000);
+    assert.equal(ordered[0]?.account, ISSUER);
+    assert.equal(ordered[1]?.account, host);
   });
 
   it('skips hex blobs without calling the loader', async () => {

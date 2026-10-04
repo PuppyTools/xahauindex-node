@@ -8,8 +8,34 @@ export interface TomlAccount {
   icon?: string;
 }
 
+export interface TomlToken {
+  issuer?: string;
+  name?: string;
+  desc?: string;
+  icon?: string;
+}
+
+export interface TomlLink {
+  url: string;
+  type: string | null;
+  title: string | null;
+}
+
+interface TomlLinkDraft {
+  url?: string;
+  type?: string;
+  title?: string;
+}
+
 export interface XrpLedgerToml {
   accounts: TomlAccount[];
+  issuers: TomlAccount[];
+  tokens: TomlToken[];
+  weblinks: TomlLinkDraft[];
+  organization: {
+    website?: string;
+    twitter?: string;
+  };
   metadata: {
     name?: string;
     description?: string;
@@ -17,8 +43,14 @@ export interface XrpLedgerToml {
   };
 }
 
+const LINK_TABLES = new Set(['WEBLINKS', 'TOKENS.WEBLINKS', 'TOKENS.URLS']);
+const TOML_LINK_LIMIT = 20;
+
+export const TOML_USER_AGENT = 'XahauIndex/1.0 (+https://github.com/PuppyTools/xahauindex-node)';
+
 const TOML_MAX_BYTES = 256_000;
 const TOML_TIMEOUT_MS = 10_000;
+const TOML_MAX_REDIRECTS = 2;
 
 function isPrivateIp(ip: string): boolean {
   if (ip === '127.0.0.1' || ip === '0.0.0.0' || ip === '::1') {
@@ -111,31 +143,98 @@ function assignMetadata(
   }
 }
 
+function assignAccountField(target: TomlAccount, key: string, value: string): void {
+  if (key === 'address') {
+    target.address = value;
+  } else if (key === 'name') {
+    target.name = value;
+  } else if (key === 'desc' || key === 'description') {
+    target.desc = value;
+  } else if (key === 'icon' || key === 'icon_url') {
+    target.icon = value;
+  }
+}
+
+function assignTokenField(target: TomlToken, key: string, value: string): void {
+  if (key === 'issuer') {
+    target.issuer = value;
+  } else if (key === 'name') {
+    target.name = value;
+  } else if (key === 'desc' || key === 'description') {
+    target.desc = value;
+  } else if (key === 'icon' || key === 'icon_url') {
+    target.icon = value;
+  }
+}
+
+function assignLinkField(target: TomlLinkDraft, key: string, value: string): void {
+  if (key === 'url' || key === 'uri' || key === 'href') {
+    target.url = value;
+  } else if (key === 'type' || key === 'kind') {
+    target.type = value;
+  } else if (key === 'title' || key === 'name') {
+    target.title = value;
+  }
+}
+
+function assignOrganizationField(
+  target: XrpLedgerToml['organization'],
+  key: string,
+  value: string,
+): void {
+  if (key === 'website' || key === 'url') {
+    target.website = value;
+  } else if (key === 'twitter' || key === 'x') {
+    target.twitter = value;
+  }
+}
+
 export function parseXrpLedgerToml(text: string): XrpLedgerToml {
-  const toml: XrpLedgerToml = { accounts: [], metadata: {} };
+  const toml: XrpLedgerToml = {
+    accounts: [],
+    issuers: [],
+    tokens: [],
+    weblinks: [],
+    organization: {},
+    metadata: {},
+  };
   let section = '';
   let currentAccount: TomlAccount | undefined;
+  let currentToken: TomlToken | undefined;
+  let currentLink: TomlLinkDraft | undefined;
 
   for (const rawLine of text.split(/\r?\n/)) {
     const line = rawLine.trim();
     if (line === '' || line.startsWith('#')) {
       continue;
     }
-    const table = line.match(/^\[\[([A-Za-z0-9_]+)\]\]$/);
+    const table = line.match(/^\[\[([A-Za-z0-9_.]+)\]\]$/);
     if (table?.[1]) {
       section = table[1].toUpperCase();
+      currentAccount = undefined;
+      currentToken = undefined;
+      currentLink = undefined;
       if (section === 'ACCOUNTS') {
         currentAccount = {};
         toml.accounts.push(currentAccount);
-      } else {
-        currentAccount = undefined;
+      } else if (section === 'ISSUERS') {
+        currentAccount = {};
+        toml.issuers.push(currentAccount);
+      } else if (section === 'TOKENS') {
+        currentToken = {};
+        toml.tokens.push(currentToken);
+      } else if (LINK_TABLES.has(section)) {
+        currentLink = {};
+        toml.weblinks.push(currentLink);
       }
       continue;
     }
-    const single = line.match(/^\[([A-Za-z0-9_]+)\]$/);
+    const single = line.match(/^\[([A-Za-z0-9_.]+)\]$/);
     if (single?.[1]) {
       section = single[1].toUpperCase();
       currentAccount = undefined;
+      currentToken = undefined;
+      currentLink = undefined;
       continue;
     }
     const kv = line.match(/^([A-Za-z0-9_]+)\s*=\s*(.+)$/);
@@ -144,16 +243,20 @@ export function parseXrpLedgerToml(text: string): XrpLedgerToml {
     }
     const key = kv[1].toLowerCase();
     const value = unquote(kv[2]);
-    if (section === 'ACCOUNTS' && currentAccount) {
-      if (key === 'address') {
-        currentAccount.address = value;
-      } else if (key === 'name') {
-        currentAccount.name = value;
-      } else if (key === 'desc' || key === 'description') {
-        currentAccount.desc = value;
-      } else if (key === 'icon' || key === 'icon_url') {
-        currentAccount.icon = value;
-      }
+    if ((section === 'ACCOUNTS' || section === 'ISSUERS') && currentAccount) {
+      assignAccountField(currentAccount, key, value);
+      continue;
+    }
+    if (section === 'TOKENS' && currentToken) {
+      assignTokenField(currentToken, key, value);
+      continue;
+    }
+    if (LINK_TABLES.has(section) && currentLink) {
+      assignLinkField(currentLink, key, value);
+      continue;
+    }
+    if (section === 'ORGANIZATION') {
+      assignOrganizationField(toml.organization, key, value);
       continue;
     }
     if (section === 'METADATA') {
@@ -163,9 +266,15 @@ export function parseXrpLedgerToml(text: string): XrpLedgerToml {
   return toml;
 }
 
+function addressMatches(value: string | undefined, account: string): boolean {
+  return value !== undefined && value.toLowerCase() === account.toLowerCase();
+}
+
 export function isAccountListed(toml: XrpLedgerToml, account: string): boolean {
-  return toml.accounts.some(
-    (entry) => entry.address !== undefined && entry.address.toLowerCase() === account.toLowerCase(),
+  return (
+    toml.accounts.some((entry) => addressMatches(entry.address, account)) ||
+    toml.issuers.some((entry) => addressMatches(entry.address, account)) ||
+    toml.tokens.some((entry) => addressMatches(entry.issuer, account))
   );
 }
 
@@ -173,17 +282,150 @@ export function pickTomlProfile(
   toml: XrpLedgerToml,
   account: string,
 ): { name?: string; description?: string; icon?: string } {
-  const entry = toml.accounts.find(
-    (item) => item.address !== undefined && item.address.toLowerCase() === account.toLowerCase(),
-  );
-  const name = entry?.name ?? toml.metadata.name;
-  const description = entry?.desc ?? toml.metadata.description;
-  const icon = entry?.icon ?? toml.metadata.icon;
+  const entry =
+    toml.issuers.find((item) => addressMatches(item.address, account)) ??
+    toml.accounts.find((item) => addressMatches(item.address, account));
+  const token = toml.tokens.find((item) => addressMatches(item.issuer, account));
+  const name = entry?.name ?? token?.name ?? toml.metadata.name;
+  const description = entry?.desc ?? token?.desc ?? toml.metadata.description;
+  const icon = entry?.icon ?? token?.icon ?? toml.metadata.icon;
   return {
     ...(name === undefined ? {} : { name }),
     ...(description === undefined ? {} : { description }),
     ...(icon === undefined ? {} : { icon }),
   };
+}
+
+export function normalizePublicUrl(raw: string | null | undefined): string | null {
+  if (raw === undefined || raw === null) {
+    return null;
+  }
+  const value = raw.trim();
+  if (value === '') {
+    return null;
+  }
+  const lowered = value.toLowerCase();
+  if (lowered.startsWith('data:') || lowered.startsWith('javascript:') || lowered.startsWith('file:')) {
+    return null;
+  }
+  let parsed: URL;
+  try {
+    parsed = new URL(value);
+  } catch {
+    return null;
+  }
+  if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+    return null;
+  }
+  if (parsed.username !== '' || parsed.password !== '') {
+    return null;
+  }
+  return value;
+}
+
+export function normalizeTomlLinkType(raw: string | null | undefined): string | null {
+  if (raw === undefined || raw === null || raw.trim() === '') {
+    return null;
+  }
+  const compact = raw.toLowerCase().replace(/[\s_-]+/g, '');
+  if (compact === 'socialmedia' || compact === 'social' || compact === 'twitter' || compact === 'x') {
+    return 'social';
+  }
+  if (compact === 'website' || compact === 'homepage' || compact === 'url') {
+    return 'website';
+  }
+  return raw.trim().toLowerCase();
+}
+
+function twitterUrl(raw: string): string | null {
+  const fromUrl = normalizePublicUrl(raw);
+  if (fromUrl) {
+    return fromUrl;
+  }
+  const handle = raw
+    .trim()
+    .replace(/^@/, '')
+    .replace(/^https?:\/\/(www\.)?(twitter|x)\.com\//i, '')
+    .split(/[/?#]/)[0];
+  if (handle === undefined || !/^[A-Za-z0-9_]{1,15}$/.test(handle)) {
+    return null;
+  }
+  return `https://x.com/${handle}`;
+}
+
+function pushTomlLink(links: TomlLink[], seen: Set<string>, draft: TomlLinkDraft): void {
+  const url = normalizePublicUrl(draft.url);
+  if (!url) {
+    return;
+  }
+  const key = url.toLowerCase();
+  if (seen.has(key) || links.length >= TOML_LINK_LIMIT) {
+    return;
+  }
+  seen.add(key);
+  const title = draft.title?.trim();
+  links.push({
+    url,
+    type: normalizeTomlLinkType(draft.type),
+    title: title === undefined || title === '' ? null : title,
+  });
+}
+
+export function pickTomlLinks(toml: XrpLedgerToml): TomlLink[] {
+  const links: TomlLink[] = [];
+  const seen = new Set<string>();
+  for (const draft of toml.weblinks) {
+    pushTomlLink(links, seen, draft);
+  }
+  if (toml.organization.website) {
+    pushTomlLink(links, seen, { url: toml.organization.website, type: 'website', title: 'Website' });
+  }
+  if (toml.organization.twitter) {
+    const url = twitterUrl(toml.organization.twitter);
+    if (url) {
+      pushTomlLink(links, seen, { url, type: 'social', title: 'Twitter' });
+    }
+  }
+  return links;
+}
+
+export function serializeTomlLinks(links: TomlLink[]): string | null {
+  return links.length === 0 ? null : JSON.stringify(links);
+}
+
+export function parseStoredTomlLinks(raw: string | null | undefined): TomlLink[] {
+  if (raw === undefined || raw === null || raw === '') {
+    return [];
+  }
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    if (!Array.isArray(parsed)) {
+      return [];
+    }
+    const links: TomlLink[] = [];
+    for (const item of parsed) {
+      if (typeof item !== 'object' || item === null || !('url' in item)) {
+        continue;
+      }
+      const record = item as { url: unknown; type?: unknown; title?: unknown };
+      const url = normalizePublicUrl(typeof record.url === 'string' ? record.url : null);
+      if (!url) {
+        continue;
+      }
+      links.push({
+        url,
+        type: typeof record.type === 'string' ? normalizeTomlLinkType(record.type) : null,
+        title: typeof record.title === 'string' && record.title.trim() !== '' ? record.title.trim() : null,
+      });
+    }
+    return links;
+  } catch {
+    return [];
+  }
+}
+
+export function websiteFromTomlLinks(links: TomlLink[]): string | null {
+  return links.find((link) => link.type === 'website')?.url ?? links[0]?.url ?? null;
 }
 
 export async function fetchPublicHttpsText(
@@ -193,6 +435,7 @@ export async function fetchPublicHttpsText(
     timeoutMs?: number;
     accept?: string;
     fetchImpl?: typeof fetch;
+    redirectsLeft?: number;
   } = {},
 ): Promise<{ text: string; contentType: string }> {
   const parsed = new URL(url);
@@ -213,9 +456,24 @@ export async function fetchPublicHttpsText(
   try {
     const response = await fetchImpl(url, {
       signal: controller.signal,
-      redirect: 'error',
-      headers: { accept: options.accept ?? '*/*' },
+      redirect: 'manual',
+      headers: {
+        accept: options.accept ?? '*/*',
+        'user-agent': TOML_USER_AGENT,
+      },
     });
+    if (response.status >= 300 && response.status < 400) {
+      const location = response.headers.get('location');
+      const redirectsLeft = options.redirectsLeft ?? TOML_MAX_REDIRECTS;
+      if (!location || redirectsLeft <= 0) {
+        throw new Error(`HTTP ${response.status}`);
+      }
+      await response.body?.cancel();
+      return fetchPublicHttpsText(new URL(location, url).toString(), {
+        ...options,
+        redirectsLeft: redirectsLeft - 1,
+      });
+    }
     if (!response.ok) {
       throw new Error(`HTTP ${response.status}`);
     }

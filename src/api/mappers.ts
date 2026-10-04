@@ -1,4 +1,5 @@
 import type { DexTrade, HookState, Issuer, OHLCVCandle, Token, TrustLine, URIToken } from '../types/api.js';
+import { parseStoredTomlLinks } from '../util/domain.js';
 import { metadataFromRow } from '../util/icon.js';
 import type {
   DexTradeRow,
@@ -24,6 +25,7 @@ export function tokenFromRow(row: TokenRow, remarks?: Record<string, string>): T
     description: row.description,
     icon_url: row.icon_url,
     website_url: row.website_url,
+    toml_links: parseStoredTomlLinks(row.toml_links),
     supply: row.supply,
     holder_count: row.holder_count,
     trust_count: row.trust_count,
@@ -50,6 +52,7 @@ export function issuerFromRow(
     toml_name: row.toml_name,
     toml_description: row.toml_description,
     toml_icon_url: row.toml_icon_url,
+    toml_links: parseStoredTomlLinks(row.toml_links),
     has_hooks: boolFromInt(row.has_hooks),
     ...(extras?.tokenCount === undefined ? {} : { token_count: extras.tokenCount }),
     first_ledger: row.first_ledger,
