@@ -29,7 +29,7 @@ XahauIndex has three layers: an **ingester** (snapshot + live WebSocket), a **SQ
                            │  reads
                            ▼
 ┌─────────────────────────────────────────────────────────────────┐
-│  Fastify API  :API_PORT/v1/…   WS /v1/subscribe                  │
+│  Fastify API  :API_PORT/docs + /v1/…   WS /v1/subscribe          │
 └─────────────────────────────────────────────────────────────────┘
 ```
 
@@ -40,9 +40,10 @@ XahauIndex has three layers: an **ingester** (snapshot + live WebSocket), a **SQ
 1. Open SQLite, run migrations, enable WAL + `busy_timeout`.
 2. Connect `@transia/xrpl` `Client` to `XAHAUD_URL` (default mainnet).
 3. If `indexer_state.snapshot_status` is not `complete`, run the snapshot.
-4. Start the TOML worker.
-5. Subscribe to `ledger` and `transactions`. Ignore ledgers `<= snapshot_ledger`.
-6. Listen on `API_HOST:API_PORT`. No auth.
+4. Start the TOML worker and the URI metadata worker (icon URLs only).
+5. If `BACKFILL_FROM_LEDGER` or `BACKFILL_LOOKBACK` is set, walk closed ledgers `FROM..L` in history mode (DEX trades + URIToken transfers only). History fetches use `BACKFILL_XAHAUD_URL` or a second env file (`BACKFILL_ENV` / `.env.backfill`) when set, otherwise `XAHAUD_URL`. Resume via `backfill_next`. Missing historical ledgers are retried, then skipped.
+6. Subscribe to `ledger`. Ignore live apply at or before `snapshot_ledger`. Live starts at `max(MAX(ledgers)+1, live_from_ledger)` and never below `L+1`.
+7. Listen on `API_HOST:API_PORT`. No auth.
 
 ### Snapshot
 
@@ -50,7 +51,8 @@ Target: the current **validated** ledger `L`.
 
 - Request `ledger_data` with `ledger_index: L`, follow `marker`.
 - Persist `snapshot_ledger`, `snapshot_marker`, `snapshot_status=running` after every page.
-- Crash resume uses the same `L` and marker. Never jump to a newer ledger mid-snapshot.
+- Crash resume uses the same `L` and marker while that ledger is still available.
+- If the node returns `ledgerNotFound` / `lgrNotFound` for `L` (public history window expired, or a load-balanced backend dropped it), reconnect and retry. If `L` is still gone and the current validated tip has moved, wipe the incomplete snapshot tables and retarget to the new tip. Do not mix objects from two snapshot ledgers.
 - After the last page: recompute token aggregates, enqueue TOML jobs, set `live_from_ledger = L+1`, `snapshot_status=complete`.
 
 Objects consumed during snapshot:
@@ -68,6 +70,18 @@ Objects consumed during snapshot:
 - Process only validated `tesSUCCESS` transactions.
 - One SQLite transaction per ledger.
 - TOML HTTP is **never** inside that transaction.
+
+### Historical backfill
+
+Optional. After snapshot, if `BACKFILL_FROM_LEDGER` (alias `FULL_HISTORY_START`; `genesis`/`start` → `1`) or `BACKFILL_LOOKBACK` is set, walk `FROM..snapshot_ledger` inclusive.
+
+- `FROM` wins when both are set. Neither set = no backfill.
+- History mode writes DEX trades (idempotent) and URIToken transfers. If the URIToken already exists from the snapshot, owner/offer/burn are left alone.
+- Missing tokens get a full apply, then a burn when the node is a `DeletedNode`.
+- RippleState, AccountRoot, SetRemarks, and SetHook are not applied.
+- Public nodes that cannot serve an old ledger: retry, then skip and persist `backfill_next`.
+- Optional dedicated history node (`BACKFILL_XAHAUD_URL`, or `XAHAUD_URL` inside `BACKFILL_ENV` / `.env.backfill`) so live subscribe can stay on a short-history websocket. `http`/`https` uses JSON-RPC `ledger`; `ws`/`wss` uses the same client as live.
+- Runs in parallel with live follow. Historical rows below `L` do not move `MAX(ledgers)` past the snapshot.
 
 ---
 
@@ -103,11 +117,15 @@ Well-known keys (`name`, `description`, `image`, `icon`, `website`, `attributes`
 
 ### Issuers + TOML
 
-`account_info` → Domain hex → `https://<domain>/.well-known/xrp-ledger.toml`. Verified if the r-address appears in `[[ACCOUNTS]]`. Re-check ~every 1000 ledgers and on Domain-changing `AccountSet`.
+`account_info` → Domain hex (printable hostname only) → `https://<domain>/.well-known/xahau.toml` ([Xahau identity spec](https://xahau.network/docs/infrastructure/identity/)). Never fetch `xrp-ledger.toml`. Hex blobs and non-hostnames are stored if printable but never fetched. Verified if the r-address appears in `[[ACCOUNTS]]` or `[[CURRENCIES]]` (custom `[[ISSUERS]]` / `[[TOKENS]]` in the same xahau.toml also count). Re-check ~every 1000 ledgers and on Domain-changing `AccountSet`. Token issuers are checked before host-only domains. Expected fetch misses (NXDOMAIN, timeout, 404, HTML stand-in, bad cert) are debug; a pass summary is info. Fetches send a product User-Agent so Cloudflare-backed sites can serve the file. Socials come from `[ORGANIZATION]` / `[[PRINCIPALS]]` (`website`, `x`, `social_*`) plus any custom `[[WEBLINKS]]` in that file.
 
 HTTPS only, timeout, size cap, no private-IP redirects.
 
 **Blackholed:** `lsfDisableMaster` and (no RegularKey or RegularKey in the known blackhole set).
+
+### Icons
+
+The API returns `icon_url` / `toml_icon_url` strings and `toml_links` (`url`, `type`, `title`). Sources: on-ledger remarks (`image` / `icon` / `icon_url` / `website`), issuer TOML `icon`, `[[WEBLINKS]]` / `[[TOKENS.WEBLINKS]]` / `[[TOKENS.URLS]]`, and `[ORGANIZATION]` website/twitter. Token `website_url` is filled from the first website link when empty. Image bytes are never downloaded for storage or proxied. `data:` URIs are discarded. When a URIToken URI is HTTPS JSON metadata, that JSON is stored on the token as `metadata`.
 
 ### DEX
 
@@ -123,7 +141,7 @@ Price is **counter per base**. Pair sides are stored in lexicographic `(currency
 
 `PriceSummary.change_24h` / `volume_24h` are derived at read time, not stored as rolling rows.
 
-History begins at `live_from_ledger`. Range filters apply to whatever the node has collected.
+History begins at `backfill_from` when a backfill is configured, otherwise `live_from_ledger`. Range filters apply to whatever the node has collected. Historical apply never rewrites snapshot token balances.
 
 ---
 
@@ -140,7 +158,7 @@ CREATE TABLE indexer_state (
 );
 ```
 
-Keys: `snapshot_status`, `snapshot_ledger`, `snapshot_marker`, `live_from_ledger`, `network_id`.
+Keys: `snapshot_status`, `snapshot_ledger`, `snapshot_marker`, `live_from_ledger`, `backfill_status`, `backfill_from`, `backfill_through`, `backfill_next`, `backfill_ledger`, `network_id`.
 
 ### `ledgers`
 
@@ -213,6 +231,7 @@ CREATE TABLE issuers (
   toml_name         TEXT,
   toml_description  TEXT,
   toml_icon_url     TEXT,
+  toml_links        TEXT,
   toml_raw          TEXT,
   has_hooks         INTEGER NOT NULL DEFAULT 0,
   first_ledger      INTEGER NOT NULL,
@@ -235,8 +254,11 @@ CREATE TABLE uri_tokens (
   destination   TEXT,
   burned        INTEGER NOT NULL DEFAULT 0,
   burn_ledger   INTEGER,
-  mint_ledger   INTEGER NOT NULL,
-  last_updated  INTEGER NOT NULL
+  mint_ledger              INTEGER NOT NULL,
+  last_updated             INTEGER NOT NULL,
+  icon_url                 TEXT,
+  uri_metadata             TEXT,
+  uri_meta_checked_ledger  INTEGER
 );
 CREATE INDEX uri_tokens_issuer ON uri_tokens(issuer);
 CREATE INDEX uri_tokens_owner ON uri_tokens(owner);
@@ -400,7 +422,7 @@ Streams: `tokens`, `uritokens`, `prices`, `hooks`.
 
 ## Key design decisions
 
-**Why a snapshot instead of live-only?** Wallets, explorers, and DEX UIs need current holder/supply/ownership/hook state. Live-only is empty until objects move. Snapshot is current state, not genesis backfill.
+**Why a snapshot instead of live-only?** Wallets, explorers, and DEX UIs need current holder/supply/ownership/hook state. Live-only is empty until objects move. Snapshot is the current-state gate; optional backfill adds historical trades and URIToken transfers without touching those balances.
 
 **Why SQLite?** Zero-dependency self-hosting. Xahau throughput fits a single-writer file. Postgres can wait for v3.
 

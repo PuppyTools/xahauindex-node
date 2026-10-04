@@ -1,0 +1,42 @@
+{
+  "name": "xahauindex-node",
+  "version": "0.1.0",
+  "description": "Self-hostable metadata indexer for the Xahau network",
+  "license": "MIT",
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "main": "dist/index.js",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "build": "tsc && node scripts/copy-migrations.js",
+    "start": "node dist/index.js",
+    "test": "node --import tsx --test \"test/**/*.test.ts\"",
+    "lint": "eslint src test"
+  },
+  "dependencies": {
+    "@fastify/cors": "^11.3.0",
+    "@fastify/type-provider-typebox": "^6.1.0",
+    "@fastify/websocket": "^11.3.3",
+    "@transia/xrpl": "^4.4.6-alpha.2",
+    "better-sqlite3": "^13.0.3",
+    "dotenv": "^18.0.5",
+    "fastify": "^5.12.5",
+    "pino": "^10.4.0",
+    "typebox": "^1.3.34"
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "@types/better-sqlite3": "^9.6.0",
+    "@types/node": "^26.6.4",
+    "eslint": "^10.12.0",
+    "tsx": "^4.23.15",
+    "typescript": "^6.0.3",
+    "typescript-eslint": "^8.71.0"
+  },
+  "allowScripts": {
+    "better-sqlite3@13.0.3": true,
+    "esbuild@0.28.2": true
+  }
+}

@@ -19,7 +19,7 @@ Do not start coding against the original attached drafts. Those drafts are super
 | 7 | Network | **Xahau mainnet** (`wss://xahau.network`). Testnet is an override, not the default. |
 | 8 | Blackholed | Master key disabled **and** RegularKey absent or a known blackhole address. |
 | 9 | Auth | **No API key.** Bind `0.0.0.0:3000`, open CORS. Operators reverse-proxy if they want TLS or ACLs. |
-| 10 | This PR | Plan and contracts only. Implementation is the next branch. |
+| 10 | Delivery | Plan first, then Phase 0–1 skeleton on `cursor/v1-skeleton-5c2e`. |
 
 ### Still out of v1
 
@@ -27,7 +27,7 @@ Do not start coding against the original attached drafts. Those drafts are super
 - Auth, API keys, rate limiting
 - Governance Game
 - Cross-chain bridges
-- Icon CDN / metadata scraping (Bithomp, Xaman, URI HTTP fetch)
+- Icon CDN / image byte cache (Bithomp, Xaman, URI HTTP image fetch). Icon *URLs* from remarks, TOML, and URI metadata JSON are in scope.
 - Multi-node federation
 - Postgres adapter
 
@@ -56,7 +56,7 @@ That implies endpoints the original draft omitted: **holders**, **trades**, and 
 | Build | `tsc` → `dist/` |
 | DB | SQLite via `better-sqlite3`, WAL, numbered SQL migrations |
 | Ledger | `@transia/xrpl` `Client` |
-| HTTP | Fastify v4 + TypeBox |
+| HTTP | Fastify v5 + TypeBox |
 | WS | `@fastify/websocket` |
 | Config | `dotenv` |
 | Logs | `pino` |
@@ -209,12 +209,12 @@ On first sight (snapshot or first trust line):
 
 1. `account_info`
 2. Domain hex → UTF-8
-3. Queue `https://<domain>/.well-known/xrp-ledger.toml` (XRPL TOML filename; Xahau issuers use it)
-4. Verify the r-address appears under `[[ACCOUNTS]]`
+3. Queue `https://<domain>/.well-known/xahau.toml` (Xahau identity file only — never `xrp-ledger.toml`)
+4. Verify the r-address appears under `[[ACCOUNTS]]` or `[[CURRENCIES]]`
 5. Store `toml_*` fields + `toml_raw` as JSON
 6. Re-verify about every 1000 ledgers, and on `AccountSet` that changes Domain
 
-TOML failures: `domain_verified = 0`, log `warn`, retry with backoff. Never fail the ledger transaction.
+TOML failures: `domain_verified = 0`, expected network misses at debug, retry every 1000 ledgers. Never fail the ledger transaction.
 
 **Blackholed:** `lsfDisableMaster` set **and** (`RegularKey` missing **or** RegularKey ∈ known blackhole set). Seed the set with the well-known XRPL/Xahau sink addresses (`rrrrrrrrrrrrrrrrrrrrBZbvji`, `rrrrrrrrrrrrrrrrrrrrn5RM1rHd`, and any Xahau-documented equivalents). Make the list a constant in `util/xahau.ts`.
 
@@ -374,7 +374,10 @@ DB_PATH=./data/xahauindex.db
 API_PORT=3000
 API_HOST=0.0.0.0
 LOG_LEVEL=info
-# v1.1
+# BACKFILL_FROM_LEDGER=genesis
+# BACKFILL_LOOKBACK=10000
+# BACKFILL_XAHAUD_URL=wss://your-full-history-node
+# BACKFILL_ENV=.env.backfill
 # FULL_HISTORY_START=
 ```
 

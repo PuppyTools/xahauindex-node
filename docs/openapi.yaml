@@ -151,7 +151,7 @@ components:
           description: Ledger index at time of response
         history_start_ledger:
           type: integer
-          description: First live ledger this node indexed (price history starts here)
+          description: Earliest ledger this node has price/transfer history for (backfill_from, else live_from_ledger)
 
     Error:
       type: object
@@ -172,6 +172,20 @@ components:
       additionalProperties:
         type: string
       description: Decoded remark name/value map
+
+    TomlLink:
+      type: object
+      required: [url]
+      properties:
+        url:
+          type: string
+        type:
+          type: string
+          nullable: true
+          description: Normalized kind (`website`, `social`, or the TOML type)
+        title:
+          type: string
+          nullable: true
 
     Token:
       type: object
@@ -198,9 +212,14 @@ components:
         icon_url:
           type: string
           nullable: true
+          description: Token icon URL from remarks or the issuer TOML. Stored as a link only; images are not cached.
         website_url:
           type: string
           nullable: true
+        toml_links:
+          type: array
+          items:
+            $ref: '#/components/schemas/TomlLink'
         supply:
           type: string
           nullable: true
@@ -300,6 +319,13 @@ components:
           type: integer
         last_updated:
           type: integer
+        icon_url:
+          type: string
+          nullable: true
+          description: On-ledger or URI-metadata image link. The indexer stores the URL only and never caches image bytes.
+        metadata:
+          nullable: true
+          description: JSON document fetched from the URIToken URI when that URI is metadata, not an image
         remarks:
           $ref: '#/components/schemas/Remarks'
         transfer_count:
@@ -362,6 +388,10 @@ components:
         toml_icon_url:
           type: string
           nullable: true
+        toml_links:
+          type: array
+          items:
+            $ref: '#/components/schemas/TomlLink'
         has_hooks:
           type: boolean
         token_count:
@@ -535,7 +565,18 @@ components:
         history_start_ledger:
           type: integer
           nullable: true
-          description: live_from_ledger — first ledger applied after snapshot
+          description: Earliest ledger with collected history (backfill_from when configured, else live_from_ledger)
+        backfill_status:
+          type: string
+          enum: [idle, running, complete]
+        backfill_from:
+          type: integer
+          nullable: true
+          description: First ledger the historical backfill will walk
+        backfill_ledger:
+          type: integer
+          nullable: true
+          description: Last historical ledger successfully applied
         ledger_index:
           type: integer
         network_ledger_index:

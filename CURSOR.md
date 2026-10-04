@@ -17,7 +17,7 @@ Repo: `github.com/PuppyTools/xahauindex-node`
 | Build | `tsc` → `dist/` | Standard, no bundler complexity needed |
 | Database | SQLite (`better-sqlite3`) | Zero-dependency self-hosting |
 | Ledger client | `@transia/xrpl` | Xahau-specific types (URIToken, SetHook, SetRemarks) |
-| HTTP server | Fastify v4 + TypeBox | Performance, compile-time safe schemas |
+| HTTP server | Fastify v5 + TypeBox | Performance, compile-time safe schemas |
 | WS server | `@fastify/websocket` | Integrates with Fastify lifecycle |
 | Migrations | numbered SQL files, append-only | Simple |
 | Config | `dotenv` | Standard |
@@ -51,22 +51,25 @@ src/
     queries/        — tokens.ts, uritokens.ts, issuers.ts, dex.ts, hooks.ts, remarks.ts
   ingester/
     index.ts        — WebSocket lifecycle manager
-    snapshot.ts     — ledger_data walk + resume
+    snapshot.ts     — ledger_data walk + resume; retarget if L is gone
+    backfill.ts     — optional historical tx walk (trades + URIToken transfers)
     ledger.ts       — ledger_closed handler, orchestrates batch processing
     tokens.ts       — IOU trust-line ingestion
     uritokens.ts    — URIToken lifecycle
     hooks.ts        — Hook state tracking
     remarks.ts      — Remarks decoder + SetRemarks apply
-    issuers.ts      — issuer profile + domain TOML verification
+    metadata.ts     — URI metadata JSON → icon URL (no image bytes)
+    issuers.ts      — issuer profile + Xahau xahau.toml (ACCOUNTS / CURRENCIES)
     dex.ts          — DEX executions → OHLCV candles
   api/
     index.ts        — Fastify plugin registration
-    routes/         — one file per resource group
+    routes/         — one file per resource group (docs.ts serves / and /docs)
     schemas/        — TypeBox schemas for request params + response shapes
   util/
     xahau.ts        — currency normalisation, account validation, hex helpers, blackhole
-    domain.ts       — /.well-known/xrp-ledger.toml fetcher/parser
+    domain.ts       — /.well-known/xahau.toml fetcher/parser
     retry.ts        — exponential backoff
+public/docs/        — branded API docs page
 dist/               — compiled output (gitignored)
 docs/
   implementation-plan.md
@@ -131,16 +134,22 @@ Copy `.env.example` to `.env`. Never commit `.env`.
 - `DB_PATH` — default `./data/xahauindex.db`
 - `API_PORT` / `API_HOST` — default `3000` / `0.0.0.0`
 - `LOG_LEVEL` — `trace|debug|info|warn|error`
+- `BACKFILL_FROM_LEDGER` — optional absolute start (`genesis`/`start` = `1`). Alias: `FULL_HISTORY_START`.
+- `BACKFILL_LOOKBACK` — if `FROM` is unset, start at `snapshot - lookback + 1`. Neither set = no backfill.
+- `BACKFILL_XAHAUD_URL` — optional dedicated history node (`ws`/`wss` or `http`/`https` JSON-RPC). Unset = reuse `XAHAUD_URL`.
+- `BACKFILL_ENV` — optional second env file for that node URL. Auto-loads `.env.backfill` when present.
 
 ## Running locally
 
 ```bash
 cp .env.example .env
 npm install
-npm run dev
+npm run dev       # tsx watch src/index.ts
 npm run build
 npm test
 ```
+
+`allowScripts` in `package.json` permits `better-sqlite3` and `esbuild` install scripts (npm 11.16+ / 12).
 
 ## Docker
 
@@ -152,9 +161,13 @@ Data persists in `xahauindex_data`. SQLite at `/data/xahauindex.db` inside the c
 
 ## v1 scope
 
-In: current-ledger snapshot · live ingest · IOU tokens · URITokens · remarks (URIToken / issuer / trust line) · issuer TOML · DEX historical OHLCV + trades · Hooks · REST + WS · Docker · no API key
+In: current-ledger snapshot · live ingest · optional historical backfill (env-bounded) · IOU tokens · URITokens · remarks (URIToken / issuer / trust line) · issuer TOML · DEX historical OHLCV + trades · Hooks · REST + WS · Docker · no API key
 
-Out: genesis tx backfill · auth/rate limiting · Governance Game · multi-node federation · off-ledger metadata scrape
+Out: auth/rate limiting · Governance Game · multi-node federation · icon CDN / image byte cache
+
+Icon URLs come from remarks, issuer TOML, or URI metadata JSON. Persist the URL string only — never download, store, or proxy image bytes. `data:` URIs are rejected. When a URIToken URI is HTTPS JSON metadata, store that JSON on the token as well.
+
+History mode must not overwrite snapshot balances, owners, issuers, or Hooks. It records DEX trades and URIToken transfers only.
 
 ---
 

@@ -1,0 +1,247 @@
+import { Client, rippleTimeToUnixTime, type LedgerStream } from '@transia/xrpl';
+
+export interface ValidatedLedger {
+  index: number;
+  hash: string;
+  closeTime: number;
+}
+
+export interface LedgerDataPageResult {
+  state: unknown[];
+  marker?: unknown;
+}
+
+export interface ClosedLedger {
+  index: number;
+  hash: string;
+  closeTime: number;
+  transactions: unknown[];
+}
+
+export interface LedgerSource {
+  getValidatedLedger(): Promise<ValidatedLedger>;
+  getLedgerDataPage(ledgerIndex: number, marker?: unknown): Promise<LedgerDataPageResult>;
+  reconnect?(): Promise<void>;
+}
+
+export interface LiveLedgerSource extends LedgerSource {
+  getLedgerWithTransactions(ledgerIndex: number): Promise<ClosedLedger>;
+  subscribeLedgers(): Promise<void>;
+  onLedgerClosed(handler: (ledger: ValidatedLedger) => void): () => void;
+}
+
+export interface XahauSource extends LiveLedgerSource {
+  connect(): Promise<void>;
+  disconnect(): Promise<void>;
+}
+
+function unixSecondsFromRipple(rippleTime: number): number {
+  return Math.floor(rippleTimeToUnixTime(rippleTime) / 1000);
+}
+
+function asLedgerRecord(value: unknown): Record<string, unknown> {
+  return typeof value === 'object' && value !== null ? (value as Record<string, unknown>) : {};
+}
+
+function isHttpUrl(url: string): boolean {
+  const protocol = new URL(url).protocol;
+  return protocol === 'http:' || protocol === 'https:';
+}
+
+export function isLedgerNotFound(error: unknown): boolean {
+  const texts: string[] = [];
+  if (error instanceof Error) {
+    texts.push(error.message);
+  }
+  if (typeof error === 'object' && error !== null) {
+    const record = error as { name?: unknown; data?: unknown };
+    if (typeof record.name === 'string') {
+      texts.push(record.name);
+    }
+    if (typeof record.data === 'object' && record.data !== null) {
+      const data = record.data as { error?: unknown; error_message?: unknown };
+      if (typeof data.error === 'string') {
+        texts.push(data.error);
+      }
+      if (typeof data.error_message === 'string') {
+        texts.push(data.error_message);
+      }
+    }
+  }
+  return texts.some((text) => /lgrNotFound|ledgerNotFound/i.test(text));
+}
+
+export function createJsonRpcSource(url: string): XahauSource {
+  const requestLedger = async (ledgerIndex: number | 'validated'): Promise<ClosedLedger> => {
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        method: 'ledger',
+        params: [
+          {
+            ledger_index: ledgerIndex,
+            transactions: true,
+            expand: true,
+          },
+        ],
+      }),
+      signal: AbortSignal.timeout(30_000),
+    });
+    if (!response.ok) {
+      throw new Error(`JSON-RPC ${response.status} from ${url}`);
+    }
+    const body = (await response.json()) as {
+      result?: {
+        status?: string;
+        error?: string;
+        error_message?: string;
+        ledger_index?: number;
+        ledger_hash?: string;
+        ledger?: Record<string, unknown>;
+      };
+      error?: string;
+    };
+    const result = body.result;
+    if (!result || result.status === 'error' || result.error || body.error) {
+      throw new Error(result?.error_message ?? result?.error ?? body.error ?? 'JSON-RPC ledger failed');
+    }
+    const ledger = asLedgerRecord(result.ledger);
+    const index = Number(result.ledger_index ?? ledger.ledger_index ?? ledgerIndex);
+    const hash = String(result.ledger_hash ?? ledger.ledger_hash ?? '');
+    const closeTime = unixSecondsFromRipple(Number(ledger.close_time ?? 0));
+    const transactions = Array.isArray(ledger.transactions) ? ledger.transactions : [];
+    return { index, hash, closeTime, transactions };
+  };
+
+  return {
+    connect: async () => undefined,
+    disconnect: async () => undefined,
+    reconnect: async () => undefined,
+    getValidatedLedger: async () => {
+      const ledger = await requestLedger('validated');
+      return { index: ledger.index, hash: ledger.hash, closeTime: ledger.closeTime };
+    },
+    getLedgerDataPage: async () => {
+      throw new Error('JSON-RPC backfill source does not page ledger_data');
+    },
+    getLedgerWithTransactions: async (ledgerIndex) => requestLedger(ledgerIndex),
+    subscribeLedgers: async () => {
+      throw new Error('JSON-RPC backfill source does not subscribe');
+    },
+    onLedgerClosed: () => () => undefined,
+  };
+}
+
+export function createBackfillSource(url: string): XahauSource {
+  if (isHttpUrl(url)) {
+    return createJsonRpcSource(url);
+  }
+  return createXahauSource(url);
+}
+
+export function createXahauSource(url: string): XahauSource {
+  const client = new Client(url);
+  const listeners = new Set<(ledger: ValidatedLedger) => void>();
+
+  const onClosed = (ledger: LedgerStream): void => {
+    const closed: ValidatedLedger = {
+      index: ledger.ledger_index,
+      hash: ledger.ledger_hash,
+      closeTime: unixSecondsFromRipple(ledger.ledger_time),
+    };
+    for (const handler of listeners) {
+      handler(closed);
+    }
+  };
+
+  return {
+    connect: async () => {
+      await client.connect();
+    },
+    disconnect: async () => {
+      client.off('ledgerClosed', onClosed);
+      listeners.clear();
+      await client.disconnect();
+    },
+    reconnect: async () => {
+      try {
+        await client.disconnect();
+      } catch {
+        // already closed
+      }
+      await client.connect();
+    },
+    getValidatedLedger: async () => {
+      const response = await client.request({
+        command: 'ledger',
+        ledger_index: 'validated',
+      });
+      const ledger = response.result.ledger as {
+        ledger_index?: number | string;
+        ledger_hash?: string;
+        close_time?: number;
+      };
+      const index = Number(response.result.ledger_index ?? ledger.ledger_index);
+      const hash = String(ledger.ledger_hash ?? '');
+      const closeTime = unixSecondsFromRipple(Number(ledger.close_time ?? 0));
+      return { index, hash, closeTime };
+    },
+    getLedgerDataPage: async (ledgerIndex, marker) => {
+      const request: Record<string, unknown> = {
+        command: 'ledger_data',
+        ledger_index: ledgerIndex,
+        binary: false,
+        limit: 1024,
+      };
+      if (marker !== undefined) {
+        request.marker = marker;
+      }
+      const response = (await client.request(
+        request as unknown as Parameters<Client['request']>[0],
+      )) as { result: { state?: unknown[]; marker?: unknown } };
+      const result = response.result;
+      const page: LedgerDataPageResult = {
+        state: Array.isArray(result.state) ? result.state : [],
+      };
+      if (result.marker !== undefined) {
+        page.marker = result.marker;
+      }
+      return page;
+    },
+    getLedgerWithTransactions: async (ledgerIndex) => {
+      const response = (await client.request({
+        command: 'ledger',
+        ledger_index: ledgerIndex,
+        transactions: true,
+        expand: true,
+      } as unknown as Parameters<Client['request']>[0])) as {
+        result: {
+          ledger_index?: number;
+          ledger_hash?: string;
+          ledger?: Record<string, unknown>;
+        };
+      };
+      const ledger = asLedgerRecord(response.result.ledger);
+      const index = Number(response.result.ledger_index ?? ledger.ledger_index ?? ledgerIndex);
+      const hash = String(response.result.ledger_hash ?? ledger.ledger_hash ?? '');
+      const closeTime = unixSecondsFromRipple(Number(ledger.close_time ?? 0));
+      const transactions = Array.isArray(ledger.transactions) ? ledger.transactions : [];
+      return { index, hash, closeTime, transactions };
+    },
+    subscribeLedgers: async () => {
+      client.off('ledgerClosed', onClosed);
+      client.on('ledgerClosed', onClosed);
+      await client.request({
+        command: 'subscribe',
+        streams: ['ledger'],
+      });
+    },
+    onLedgerClosed: (handler) => {
+      listeners.add(handler);
+      return () => {
+        listeners.delete(handler);
+      };
+    },
+  };
+}
