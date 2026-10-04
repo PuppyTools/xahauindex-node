@@ -24,7 +24,7 @@ Do not start coding against the original attached drafts. Those drafts are super
 ### Still out of v1
 
 - Full transaction history / genesis backfill
-- Auth, API keys, rate limiting
+- Auth, API keys (operator IP rate limiting is optional env, still no keys)
 - Governance Game
 - Cross-chain bridges
 - Icon CDN / image byte cache (Bithomp, Xaman, URI HTTP image fetch). Icon *URLs* from remarks, TOML, and URI metadata JSON are in scope.
@@ -273,7 +273,7 @@ Contract: `docs/openapi.yaml`. Envelope and errors unchanged.
 | GET | `/v1/hooks/{account}` | |
 | WS | `/v1/subscribe` | streams: `tokens`, `uritokens`, `prices`, `hooks` |
 
-CORS: `origin: true` (reflect request origin) or `*`. No auth plugin.
+CORS: `origin: true` (reflect request origin) or `*`. No auth plugin. Optional `@fastify/rate-limit` when `API_RATE_LIMIT_MAX` is set.
 
 ---
 

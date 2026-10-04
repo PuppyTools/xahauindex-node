@@ -140,6 +140,11 @@ Copy `.env.example` to `.env`. Never commit `.env`.
 - `BACKFILL_XAHAUD_URL` — optional dedicated history node (`ws`/`wss` or `http`/`https` JSON-RPC). Unset = reuse `XAHAUD_URL`.
 - `BACKFILL_ENV` — optional second env file for that node URL. Auto-loads `.env.backfill` when present.
 - `BACKFILL_MIN_INTERVAL_MS` — delay between historical fetches. Unset = `2000` when sharing the live node (public RPC quotas), `0` on a dedicated history URL. A shared node also gives live fetches priority and pauses backfill after `tooBusy`.
+- `API_RATE_LIMIT_MAX` — optional HTTP requests per IP per window. Unset / `0` = off. No API keys.
+- `API_RATE_LIMIT_WINDOW_MS` — default `60000`.
+- `API_TRUST_PROXY` — default `false`. Set `true` only behind a reverse proxy that sets `X-Forwarded-For`.
+- `API_RATE_LIMIT_ALLOW` — comma-separated IPs / CIDRs that skip the limiter.
+- `API_WS_MAX_PER_IP` — concurrent `/v1/subscribe` sockets per IP. Unset = `8` when `MAX` is set, unlimited when off. `0` disables the cap.
 
 ## Running locally
 
@@ -163,9 +168,9 @@ Data persists in `xahauindex_data`. SQLite at `/data/xahauindex.db` inside the c
 
 ## v1 scope
 
-In: current-ledger snapshot · live ingest · optional historical backfill (env-bounded) · IOU tokens · URITokens · remarks (URIToken / issuer / trust line) · issuer TOML · DEX historical OHLCV + trades · Hooks · REST + WS · Docker · no API key
+In: current-ledger snapshot · live ingest · optional historical backfill (env-bounded) · IOU tokens · URITokens · remarks (URIToken / issuer / trust line) · issuer TOML · DEX historical OHLCV + trades · Hooks · REST + WS · Docker · no API key · optional operator IP rate limit
 
-Out: auth/rate limiting · Governance Game · multi-node federation · icon CDN / image byte cache
+Out: auth / API keys · Governance Game · multi-node federation · icon CDN / image byte cache
 
 Icon URLs come from remarks, issuer TOML, or URI metadata JSON. Persist the URL string only — never download, store, or proxy image bytes. `data:` URIs are rejected. When a URIToken URI is HTTPS JSON metadata, store that JSON on the token as well.
 

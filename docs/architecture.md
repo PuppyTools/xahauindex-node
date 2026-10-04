@@ -43,7 +43,7 @@ XahauIndex has three layers: an **ingester** (snapshot + live WebSocket), a **SQ
 4. Start the TOML worker and the URI metadata worker (icon URLs only).
 5. If `BACKFILL_FROM_LEDGER` or `BACKFILL_LOOKBACK` is set, walk closed ledgers `L..FROM` downward in history mode (DEX trades + URIToken transfers only). History fetches use `BACKFILL_XAHAUD_URL` or a second env file (`BACKFILL_ENV` / `.env.backfill`) when set, otherwise `XAHAUD_URL`. Resume via `backfill_next` (next lower ledger). Missing historical ledgers are retried, then skipped.
 6. Subscribe to `ledger`. Ignore live apply at or before `snapshot_ledger`. Live starts at `max(MAX(ledgers)+1, live_from_ledger)` and never below `L+1`.
-7. Listen on `API_HOST:API_PORT`. No auth.
+7. Listen on `API_HOST:API_PORT`. No auth. If `API_RATE_LIMIT_MAX` is set, apply an in-process per-IP HTTP limit and a `/v1/subscribe` connection cap.
 
 ### Snapshot
 
@@ -421,6 +421,16 @@ Server:
 ```
 
 Streams: `tokens`, `uritokens`, `prices`, `hooks`.
+
+### Operator rate limiting
+
+Optional. Off unless `API_RATE_LIMIT_MAX` is a positive integer. Still no API keys.
+
+- Key is `request.ip`. `API_TRUST_PROXY` must stay false on a public bind so clients cannot spoof `X-Forwarded-For`.
+- Same HTTP bucket for REST, `/docs`, OpenAPI, unknown routes, and the WebSocket upgrade.
+- Over limit: `429` `{ error: { code: "RATE_LIMITED", message: "Too many requests" } }` plus `Retry-After`.
+- `API_WS_MAX_PER_IP` caps concurrent `/v1/subscribe` sockets per IP (default 8 when the HTTP limiter is on).
+- In-memory only. Ingest / snapshot / xahaud quota are separate.
 
 ---
 

@@ -4,7 +4,7 @@
 
 XahauIndex connects to a xahaud node, snapshots the current ledger, follows it in real time, and serves an enriched REST + WebSocket API covering IOU tokens, URITokens, issuer profiles, DEX prices, and Hook activity — the Xahau equivalent of [xrplmeta](https://github.com/xrplmeta/node).
 
-> Run your own instance. No API key. Put a reverse proxy in front if you want TLS.
+> Run your own instance. No API key. Put a reverse proxy in front if you want TLS. Optional IP rate limits are env-off.
 
 ---
 
@@ -65,6 +65,7 @@ LOG_LEVEL=info
 # BACKFILL_LOOKBACK=10000
 # BACKFILL_XAHAUD_URL=wss://your-full-history-node
 # BACKFILL_ENV=.env.backfill
+# API_RATE_LIMIT_MAX=120
 ```
 
 Default network is **Xahau mainnet**. A public WebSocket is fine for development; a local xahaud is better for snapshot speed.
@@ -80,6 +81,18 @@ Historical backfill is **off** unless you set one of:
 | `BACKFILL_MIN_INTERVAL_MS` | Delay between historical fetches. Unset = `2000` when sharing `XAHAUD_URL`, `0` on a dedicated history node. |
 
 If both stop bounds are set, `BACKFILL_FROM_LEDGER` wins. The walk starts at the snapshot ledger and decrements until that bound — `genesis` means keep going backward until ledger 1. Resume is the next lower ledger (`backfill_next`). Use a full-history node for backfill when the subscription node does not keep old ledgers. Sharing the public RPC with live subscribe is paced (2s) so a genesis walk cannot exhaust the 10s quota and drop the live stream. Live fetches win the shared socket; `tooBusy` sets one cooldown and pauses backfill so both sides do not retry together. Rate-limit responses do not skip a ledger or stop the process. Public nodes that still cannot serve an index are retried, then skipped. The snapshot remains the source of current balances, owners, issuers, and Hooks. Backfill records DEX trades and URIToken transfers only.
+
+Operator rate limiting is **off** unless `API_RATE_LIMIT_MAX` is a positive integer. There is still no API key.
+
+| Variable | Meaning |
+|----------|---------|
+| `API_RATE_LIMIT_MAX` | HTTP requests per client IP per window. Unset / `0` = unlimited. |
+| `API_RATE_LIMIT_WINDOW_MS` | Window length. Default `60000`. |
+| `API_TRUST_PROXY` | `true` when a reverse proxy sets `X-Forwarded-For`. Leave `false` on a bare `:3000` so clients cannot spoof the key. |
+| `API_RATE_LIMIT_ALLOW` | Comma-separated IPs / CIDRs that skip the limiter. |
+| `API_WS_MAX_PER_IP` | Concurrent `/v1/subscribe` sockets per IP. Unset = `8` when `MAX` is set, unlimited when `MAX` is off. `0` disables the cap. |
+
+Over the limit the API returns `429` `{ error: { code: "RATE_LIMITED", message: "Too many requests" } }` with `Retry-After`. A public instance can start at `API_RATE_LIMIT_MAX=120`. Docker health checks hit `127.0.0.1`; add that address to `API_RATE_LIMIT_ALLOW` if the max is very low.
 
 ---
 
@@ -154,7 +167,7 @@ See [`docs/architecture.md`](docs/architecture.md) and [`docs/implementation-pla
 ## Roadmap
 
 - **v1.0** — snapshot + live, IOUs, URITokens, remarks, issuers, DEX candles/trades, Hooks, REST + WS, Docker, optional historical backfill
-- **v1.1** — auth/rate limiting
+- **v1.1** — optional operator rate limiting (no API keys)
 - **v2.0** — public hosted instance, client SDK
 - **v3.0** — Governance Game, bridge tracking
 

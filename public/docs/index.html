@@ -322,7 +322,7 @@
       <header class="hero" id="overview">
         <div class="kicker">Xahau network · self-hosted</div>
         <h2>The missing data layer for wallets, explorers, and DEX UIs.</h2>
-        <p class="lede">XahauIndex snapshots the current ledger, follows it live, and serves enriched REST + WebSocket APIs for IOUs, URITokens, issuer profiles, DEX candles, and Hooks. No API key. Put a reverse proxy in front if you want TLS.</p>
+        <p class="lede">XahauIndex snapshots the current ledger, follows it live, and serves enriched REST + WebSocket APIs for IOUs, URITokens, issuer profiles, DEX candles, and Hooks. No API key. Operators can turn on a per-IP rate limit. Put a reverse proxy in front if you want TLS.</p>
         <div class="chips">
           <span class="chip">No auth</span>
           <span class="chip">Envelope <code>{ data, meta }</code></span>
@@ -365,6 +365,7 @@
           <tbody>
             <tr><td><code>NOT_FOUND</code></td><td>Unknown route or object</td></tr>
             <tr><td><code>BAD_REQUEST</code></td><td>Missing IOU issuer, invalid JSON subscribe, or a 400 from validation</td></tr>
+            <tr><td><code>RATE_LIMITED</code></td><td>Optional operator limit (`API_RATE_LIMIT_MAX` / `API_WS_MAX_PER_IP`). HTTP `429` plus `Retry-After`</td></tr>
             <tr><td><code>INTERNAL</code></td><td>Unexpected server error</td></tr>
           </tbody>
         </table>
@@ -599,7 +600,7 @@
   "ledger_index": 26272654,
   "data": { "currency": "USD", "issuer": "rHb9…" }
 }</pre>
-            <p class="sub"><code>unsubscribe</code> uses the same shape. Unknown commands and invalid JSON return the standard <code>error</code> object.</p>
+            <p class="sub"><code>unsubscribe</code> uses the same shape. Unknown commands and invalid JSON return the standard <code>error</code> object. When the operator cap is on, extra sockets from the same IP are rejected with <code>RATE_LIMITED</code>.</p>
           </div>
         </article>
       </section>

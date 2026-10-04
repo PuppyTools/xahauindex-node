@@ -30,6 +30,7 @@ describe('API docs', () => {
     assert.match(docs.body, /\/v1\/tokens\/\{currency\}\/\{issuer\}/);
     assert.match(docs.body, /\/v1\/subscribe/);
     assert.match(docs.body, /source: "onchain"/);
+    assert.match(docs.body, /RATE_LIMITED/);
 
     const root = await app.inject({ method: 'GET', url: '/' });
     assert.equal(root.statusCode, 200);
