@@ -40,6 +40,8 @@ describe('API docs', () => {
     assert.match(docs.body, /XahauIndex/);
     assert.match(docs.body, /\/v1\/tokens\/\{currency\}\/\{issuer\}/);
     assert.match(docs.body, /\/v1\/subscribe/);
+    assert.match(docs.body, /Not a stand-in for/);
+    assert.match(docs.body, /raw ledgers, transactions, and books/);
     assert.match(docs.body, /"source": "onchain"/);
     assert.match(docs.body, /RATE_LIMITED/);
     assert.match(docs.body, /\/v1\/hooks\/definitions/);
@@ -53,6 +55,10 @@ describe('API docs', () => {
     assert.match(docs.body, /curl -s '?http:\/\/localhost:3000\/v1\/tokens/);
     assert.match(docs.body, /curl -s '?http:\/\/localhost:3000\/v1\/uritokens/);
     assert.match(docs.body, /curl -s '?http:\/\/localhost:3000\/v1\/prices/);
+    assert.match(docs.body, />Status</);
+    assert.match(docs.body, />Data Range</);
+    assert.match(docs.body, /id="range"/);
+    assert.match(docs.body, /history_start_ledger/);
     assert.match(docs.body, /\/docs\/xi\.svg/);
     assert.match(docs.body, /rel="icon" href="\/docs\/favicon\.svg"/);
     assert.doesNotMatch(docs.body, /M24 3 43 14\.5/);

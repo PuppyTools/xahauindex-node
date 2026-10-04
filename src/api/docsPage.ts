@@ -394,7 +394,16 @@ export function renderDocsHtml(spec: OpenApiSpec, config?: Config): string {
           <p>Metadata node API</p>
         </div>
       </div>
-      <div class="status"><span class="dot" id="dot"></span><span id="status">Checking this node…</span></div>
+      <div class="node-meta">
+        <div>
+          <div class="meta-label">Status</div>
+          <div class="status"><span class="dot" id="dot"></span><span id="status">Checking this node…</span></div>
+        </div>
+        <div>
+          <div class="meta-label">Data Range</div>
+          <div class="status range"><span id="range">Checking this node…</span></div>
+        </div>
+      </div>
       <nav>
         <div class="group">Start</div>
         <a href="#overview">Overview</a>
@@ -448,7 +457,23 @@ export function renderDocsHtml(spec: OpenApiSpec, config?: Config): string {
   </div>
   <script>
     const statusEl = document.getElementById('status');
+    const rangeEl = document.getElementById('range');
     const dot = document.getElementById('dot');
+    const ledgerLabel = (value) => Number(value).toLocaleString('en-US');
+    const rangeLabel = (data) => {
+      const end = Number(data.ledger_index);
+      const starts = [data.history_start_ledger, data.snapshot_ledger]
+        .map((value) => Number(value))
+        .filter((value) => Number.isInteger(value) && value > 0);
+      if (!Number.isInteger(end) || end <= 0) {
+        return 'No ledger data yet';
+      }
+      const start = starts.length === 0 ? end : Math.min(...starts, end);
+      if (start === end) {
+        return ledgerLabel(end);
+      }
+      return ledgerLabel(start) + ' – ' + ledgerLabel(end);
+    };
     fetch('/v1/status')
       .then((r) => r.json())
       .then((body) => {
@@ -458,9 +483,11 @@ export function renderDocsHtml(spec: OpenApiSpec, config?: Config): string {
           ? 'This node is live at ledger ' + data.ledger_index
           : 'This node is ' + label;
         dot.classList.add(label);
+        rangeEl.textContent = rangeLabel(data);
       })
       .catch(() => {
         statusEl.textContent = 'Status unavailable';
+        rangeEl.textContent = 'Range unavailable';
       });
 
     const links = [...document.querySelectorAll('nav a[href^="#"]')];
