@@ -96,6 +96,10 @@ describe('API docs', () => {
     const css = await app.inject({ method: 'GET', url: '/docs/docs.css' });
     assert.equal(css.statusCode, 200);
     assert.match(css.headers['content-type'] ?? '', /text\/css/);
+    assert.match(css.body, /overflow-x: clip/);
+    assert.match(css.body, /white-space: pre-wrap/);
+    assert.match(css.body, /grid-template-columns: var\(--sidebar\) minmax\(0, 1fr\)/);
+    assert.match(css.body, /overflow-wrap: anywhere/);
 
     const root = await app.inject({ method: 'GET', url: '/' });
     assert.equal(root.statusCode, 200);
