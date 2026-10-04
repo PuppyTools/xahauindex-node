@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
 import {
+  absDecimal,
   addDecimal,
   decodeCurrency,
   dropsToXah,
@@ -41,6 +42,17 @@ describe('decimals', () => {
     assert.equal(subtractDecimal('2.5', '1.25'), '1.25');
     assert.equal(dropsToXah('1000000'), '1');
     assert.equal(dropsToXah('1500000'), '1.5');
+  });
+
+  it('adds XRPL scientific-notation IOU amounts', () => {
+    assert.equal(addDecimal('0', '5296754300000000e-26'), '0.000000000052967543');
+    assert.equal(addDecimal('5296754300000000e-26', '1'), '1.000000000052967543');
+    assert.equal(addDecimal('1.23e-2', '4.56e-2'), '0.0579');
+    assert.equal(addDecimal('3.5E+6', '500000'), '4000000');
+    assert.ok(isZeroDecimal('0e-26'));
+    assert.ok(isZeroDecimal('0E0'));
+    assert.equal(isZeroDecimal('5296754300000000e-26'), false);
+    assert.equal(absDecimal('-5296754300000000e-26'), '0.000000000052967543');
   });
 });
 

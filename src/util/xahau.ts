@@ -94,11 +94,22 @@ export function serializeAmount(amount: Amount | undefined): string | null {
   });
 }
 
+const DECIMAL_RE = /^(\d*)(?:\.(\d*))?(?:[eE]([+-]?\d+))?$/;
+const MAX_DECIMAL_EXPONENT = 200;
+
 export function isZeroDecimal(value: string): boolean {
+  const parsed = tryParseDecimal(value);
+  if (parsed) {
+    return parsed.digits === 0n;
+  }
   return /^[+-]?0+(?:\.0+)?$/.test(value.trim());
 }
 
 export function isNegativeDecimal(value: string): boolean {
+  const parsed = tryParseDecimal(value);
+  if (parsed) {
+    return parsed.negative && parsed.digits !== 0n;
+  }
   const trimmed = value.trim();
   return trimmed.startsWith('-') && !isZeroDecimal(trimmed);
 }
@@ -112,6 +123,10 @@ export function negateDecimal(value: string): string {
 }
 
 export function absDecimal(value: string): string {
+  const parsed = tryParseDecimal(value);
+  if (parsed) {
+    return formatDecimal(false, parsed.digits, parsed.scale);
+  }
   return isNegativeDecimal(value) ? negateDecimal(value) : stripPlus(value);
 }
 
@@ -120,15 +135,45 @@ function stripPlus(value: string): string {
   return trimmed.startsWith('+') ? trimmed.slice(1) : trimmed;
 }
 
+function tryParseDecimal(value: string): { negative: boolean; digits: bigint; scale: number } | null {
+  try {
+    return parseDecimal(value);
+  } catch {
+    return null;
+  }
+}
+
 function parseDecimal(value: string): { negative: boolean; digits: bigint; scale: number } {
   const trimmed = stripPlus(value);
   const negative = trimmed.startsWith('-');
   const unsigned = negative ? trimmed.slice(1) : trimmed;
-  const [wholeRaw = '0', fracRaw = ''] = unsigned.split('.');
+  if (unsigned === '') {
+    return { negative: false, digits: 0n, scale: 0 };
+  }
+  const match = DECIMAL_RE.exec(unsigned);
+  const wholeRaw = match?.[1];
+  const fracRaw = match?.[2];
+  const expRaw = match?.[3];
+  if (!match || (wholeRaw === '' && (fracRaw === undefined || fracRaw === ''))) {
+    throw new SyntaxError(`Invalid decimal amount: ${value}`);
+  }
+  const exp = expRaw === undefined ? 0 : Number.parseInt(expRaw, 10);
+  if (!Number.isSafeInteger(exp) || Math.abs(exp) > MAX_DECIMAL_EXPONENT) {
+    throw new SyntaxError(`Decimal exponent out of range: ${value}`);
+  }
   const whole = wholeRaw === '' ? '0' : wholeRaw;
-  const frac = fracRaw.replace(/0+$/, '');
-  const digits = BigInt(`${whole}${frac}` || '0');
-  return { negative, digits, scale: frac.length };
+  const frac = fracRaw ?? '';
+  let digits = BigInt(`${whole}${frac}` || '0');
+  let scale = frac.length - exp;
+  if (scale < 0) {
+    digits *= 10n ** BigInt(-scale);
+    scale = 0;
+  }
+  while (scale > 0 && digits % 10n === 0n) {
+    digits /= 10n;
+    scale -= 1;
+  }
+  return { negative: digits === 0n ? false : negative, digits, scale };
 }
 
 function formatDecimal(negative: boolean, digits: bigint, scale: number): string {

@@ -6,7 +6,7 @@ import { upsertOhlcvCandle } from '../../src/db/queries/dex.js';
 import { setIndexerState, getIndexerState } from '../../src/db/queries/indexer.js';
 import { upsertIssuer } from '../../src/db/queries/issuers.js';
 import { listRemarksByObject, upsertRemark, remarksToMap } from '../../src/db/queries/remarks.js';
-import { getToken, upsertToken } from '../../src/db/queries/tokens.js';
+import { getToken, recomputeTokenAggregates, upsertToken, upsertTrustLine } from '../../src/db/queries/tokens.js';
 import { sampleIssuer, sampleToken } from '../helpers.js';
 
 const dbs: SqliteDatabase[] = [];
@@ -109,6 +109,33 @@ describe('openDatabase', () => {
     assert.equal(rows.length, 1);
     assert.equal(rows[0]?.close, 1.75);
     assert.equal(rows[0]?.trade_count, 2);
+  });
+
+  it('sums scientific-notation trust-line balances into supply', () => {
+    const db = memoryDb();
+    const issuer = sampleIssuer();
+    const token = sampleToken();
+    upsertIssuer(db, issuer);
+    upsertToken(db, token);
+    upsertTrustLine(db, {
+      id: `rPT1Sjq2YGrBMTttX4GZHjKu9dyfzbpAYe:${token.currency}:${issuer.account}`,
+      account: 'rPT1Sjq2YGrBMTttX4GZHjKu9dyfzbpAYe',
+      currency: token.currency,
+      issuer: issuer.account,
+      balance: '5296754300000000e-26',
+      limit_peer: '100',
+      quality_in: null,
+      quality_out: null,
+      flags: 0,
+      first_ledger: 1,
+      last_updated: 1,
+    });
+    recomputeTokenAggregates(db);
+    const found = getToken(db, token.id);
+    assert.ok(found);
+    assert.equal(found.supply, '0.000000000052967543');
+    assert.equal(found.holder_count, 1);
+    assert.equal(found.trust_count, 1);
   });
 
   it('persists indexer_state keys for snapshot resume', () => {
