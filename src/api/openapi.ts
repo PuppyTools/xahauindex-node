@@ -87,6 +87,7 @@ export interface DocsExtension {
   headline?: string;
   lede?: string;
   notice?: string;
+  site?: string;
   donate?: DocsDonate;
   try?: DocsTry;
   conventions?: DocsCard[];

@@ -26,6 +26,7 @@ describe('loadConfig', () => {
     assert.equal(config.dbPath, './data/xahauindex.db');
     assert.equal(config.apiPort, 3000);
     assert.equal(config.apiHost, '0.0.0.0');
+    assert.equal(DEFAULT_API_BASE_URL, 'http://localhost:3000');
     assert.equal(config.apiBaseUrl, DEFAULT_API_BASE_URL);
     assert.equal(config.logLevel, 'info');
     assert.equal(config.apiRateLimitMax, null);

@@ -69,6 +69,8 @@ describe('API docs', () => {
     assert.match(docs.body, /rPUPpkfohJsWVoXoXDbNZ7zKfk2FBB8Xwo/);
     assert.match(docs.body, /not affiliated with/);
     assert.match(docs.body, /Xahau\/Graphics/);
+    assert.match(docs.body, /xahauindex\.dev/);
+    assert.doesNotMatch(docs.body, /curl[^<]*xahauindex\.dev/);
     assert.doesNotMatch(docs.body, /Try this node/);
 
     const mark = await app.inject({ method: 'GET', url: '/docs/xi.svg' });
@@ -104,6 +106,8 @@ describe('API docs', () => {
     assert.match(cookbook.body, /curl -s http:\/\/localhost:3000\/v1\/status/);
     assert.match(cookbook.body, /not affiliated with/);
     assert.match(cookbook.body, /Xahau\/Graphics/);
+    assert.match(cookbook.body, /Project site: https:\/\/xahauindex\.dev/);
+    assert.doesNotMatch(cookbook.body, /curl[^`]*xahauindex\.dev/);
 
     await app.close();
   });

@@ -139,7 +139,7 @@ Copy `.env.example` to `.env`. Never commit `.env`.
 - `XAHAUD_URL` — default `wss://xahau.network`
 - `DB_PATH` — default `./data/xahauindex.db`
 - `API_PORT` / `API_HOST` — default `3000` / `0.0.0.0`
-- `API_BASE_URL` — public origin for `/docs` cookbook curls, Open links, and `/v1/openapi.yaml`. Default `http://localhost:3000`. Does not change the listen address.
+- `API_BASE_URL` — public origin for `/docs` cookbook curls, Open links, and `/v1/openapi.yaml`. Default `http://localhost:3000` when unset. Does not change the listen address. Project site: `https://xahauindex.dev`.
 - `LOG_LEVEL` — `trace|debug|info|warn|error`
 - `BACKFILL_FROM_LEDGER` — optional earliest ledger the walk stops at (`genesis`/`start` = `1`). Alias: `FULL_HISTORY_START`.
 - `BACKFILL_LOOKBACK` — if `FROM` is unset, stop at `snapshot - lookback + 1`. Neither set = no backfill. Walk is snapshot → FROM.

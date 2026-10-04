@@ -311,6 +311,8 @@ export function renderCookbookMarkdown(
       '',
       'XahauIndex is an independent PuppyTools project. It is not affiliated with, endorsed by, or a product of the Xahau network or its operators. The XI mark is original artwork inspired by [Xahau/Graphics](https://github.com/Xahau/Graphics).',
       '',
+      `Project site: ${spec['x-docs']?.site ?? 'https://xahauindex.dev'}.`,
+      '',
       `Base URL: \`${baseUrl}\`. Wait until \`/v1/status\` reports \`snapshot_status: complete\` before expecting token, URIToken, issuer, or Hook lists.`,
       '',
     );
@@ -352,6 +354,14 @@ function renderNotice(docs: NonNullable<OpenApiSpec['x-docs']>): string {
     return '';
   }
   return `<p class="notice">${inlineMarkdown(notice)}</p>`;
+}
+
+function renderSite(docs: NonNullable<OpenApiSpec['x-docs']>): string {
+  const site = docs.site?.trim() ?? '';
+  if (site === '') {
+    return '';
+  }
+  return `Project site: <a href="${escapeHtml(site)}">${escapeHtml(site.replace(/^https?:\/\//, ''))}</a>.`;
 }
 
 function renderDonate(docs: NonNullable<OpenApiSpec['x-docs']>): string {
@@ -475,6 +485,7 @@ export function renderDocsHtml(spec: OpenApiSpec, config?: Config): string {
 
       <footer>
         ${renderNotice(docs)}
+        ${renderSite(docs)}
         This page is generated from <a href="/v1/openapi.yaml">/v1/openapi.yaml</a>.
         Source: <a href="https://github.com/PuppyTools/xahauindex-node">PuppyTools/xahauindex-node</a>.
         MIT.

@@ -13,7 +13,7 @@ info:
     No API key. Operators may enable a per-IP HTTP limit (`API_RATE_LIMIT_MAX`);
     over the limit the API returns `429` with `error.code` `RATE_LIMITED`.
   contact:
-    url: https://github.com/PuppyTools/xahauindex-node
+    url: https://xahauindex.dev
   license:
     name: MIT
 
@@ -34,6 +34,7 @@ x-docs:
     [Xahau](https://xahau.network) network or its operators. The XI mark is original
     artwork inspired by the official letterforms in
     [Xahau/Graphics](https://github.com/Xahau/Graphics).
+  site: https://xahauindex.dev
   donate:
     label: Donations in XAH
     address: rPUPpkfohJsWVoXoXDbNZ7zKfk2FBB8Xwo
