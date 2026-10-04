@@ -47,6 +47,8 @@ cp .env.example .env
 npm run dev
 ```
 
+`package.json` already allowlists the install scripts for `better-sqlite3` (native SQLite binding) and `esbuild` (via `tsx`). npm 11.16+ / 12 skip those unless they are listed.
+
 ---
 
 ## Configuration
