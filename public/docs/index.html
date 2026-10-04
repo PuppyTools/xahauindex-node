@@ -385,7 +385,7 @@
               <thead><tr><th>Field</th><th>Meaning</th></tr></thead>
               <tbody>
                 <tr><td><code>snapshot_status</code></td><td><code>pending</code> · <code>running</code> · <code>complete</code></td></tr>
-                <tr><td><code>history_start_ledger</code></td><td>Earliest ledger with collected history (backfill start, else live-from)</td></tr>
+                <tr><td><code>history_start_ledger</code></td><td>Earliest ledger with collected history (backfill frontier while walking down, else live-from)</td></tr>
                 <tr><td><code>backfill_status</code> / <code>backfill_from</code> / <code>backfill_ledger</code></td><td>Optional historical walk</td></tr>
                 <tr><td><code>lag_ledgers</code></td><td>Network tip minus last applied ledger</td></tr>
               </tbody>

@@ -41,7 +41,7 @@ XahauIndex has three layers: an **ingester** (snapshot + live WebSocket), a **SQ
 2. Connect `@transia/xrpl` `Client` to `XAHAUD_URL` (default mainnet).
 3. If `indexer_state.snapshot_status` is not `complete`, run the snapshot.
 4. Start the TOML worker and the URI metadata worker (icon URLs only).
-5. If `BACKFILL_FROM_LEDGER` or `BACKFILL_LOOKBACK` is set, walk closed ledgers `FROM..L` in history mode (DEX trades + URIToken transfers only). History fetches use `BACKFILL_XAHAUD_URL` or a second env file (`BACKFILL_ENV` / `.env.backfill`) when set, otherwise `XAHAUD_URL`. Resume via `backfill_next`. Missing historical ledgers are retried, then skipped.
+5. If `BACKFILL_FROM_LEDGER` or `BACKFILL_LOOKBACK` is set, walk closed ledgers `L..FROM` downward in history mode (DEX trades + URIToken transfers only). History fetches use `BACKFILL_XAHAUD_URL` or a second env file (`BACKFILL_ENV` / `.env.backfill`) when set, otherwise `XAHAUD_URL`. Resume via `backfill_next` (next lower ledger). Missing historical ledgers are retried, then skipped.
 6. Subscribe to `ledger`. Ignore live apply at or before `snapshot_ledger`. Live starts at `max(MAX(ledgers)+1, live_from_ledger)` and never below `L+1`.
 7. Listen on `API_HOST:API_PORT`. No auth.
 
@@ -73,13 +73,15 @@ Objects consumed during snapshot:
 
 ### Historical backfill
 
-Optional. After snapshot, if `BACKFILL_FROM_LEDGER` (alias `FULL_HISTORY_START`; `genesis`/`start` → `1`) or `BACKFILL_LOOKBACK` is set, walk `FROM..snapshot_ledger` inclusive.
+Optional. After snapshot, if `BACKFILL_FROM_LEDGER` (alias `FULL_HISTORY_START`; `genesis`/`start` → `1`) or `BACKFILL_LOOKBACK` is set, walk `snapshot_ledger` down to `FROM` inclusive.
 
+- Recent history is filled first. `genesis` keeps decrementing until ledger 1.
 - `FROM` wins when both are set. Neither set = no backfill.
 - History mode writes DEX trades (idempotent) and URIToken transfers. If the URIToken already exists from the snapshot, owner/offer/burn are left alone.
 - Missing tokens get a full apply, then a burn when the node is a `DeletedNode`.
 - RippleState, AccountRoot, SetRemarks, and SetHook are not applied.
 - Public nodes that cannot serve an old ledger: retry, then skip and persist `backfill_next`.
+- Sharing the live websocket paces fetches (`BACKFILL_MIN_INTERVAL_MS`, default 2000ms), gives live the shared quota first, and pauses backfill after `tooBusy` so both workers do not retry the same window. Rate-limit errors wait for the hinted retry and never skip a ledger or tear down live subscribe.
 - Optional dedicated history node (`BACKFILL_XAHAUD_URL`, or `XAHAUD_URL` inside `BACKFILL_ENV` / `.env.backfill`) so live subscribe can stay on a short-history websocket. `http`/`https` uses JSON-RPC `ledger`; `ws`/`wss` uses the same client as live.
 - Runs in parallel with live follow. Historical rows below `L` do not move `MAX(ledgers)` past the snapshot.
 
@@ -141,7 +143,7 @@ Price is **counter per base**. Pair sides are stored in lexicographic `(currency
 
 `PriceSummary.change_24h` / `volume_24h` are derived at read time, not stored as rolling rows.
 
-History begins at `backfill_from` when a backfill is configured, otherwise `live_from_ledger`. Range filters apply to whatever the node has collected. Historical apply never rewrites snapshot token balances.
+History begins at the backfill frontier (`backfill_ledger` while walking down, `backfill_from` when complete), otherwise `live_from_ledger`. Range filters apply to whatever the node has collected. Historical apply never rewrites snapshot token balances.
 
 ---
 
@@ -158,7 +160,7 @@ CREATE TABLE indexer_state (
 );
 ```
 
-Keys: `snapshot_status`, `snapshot_ledger`, `snapshot_marker`, `live_from_ledger`, `backfill_status`, `backfill_from`, `backfill_through`, `backfill_next`, `backfill_ledger`, `network_id`.
+Keys: `snapshot_status`, `snapshot_ledger`, `snapshot_marker`, `live_from_ledger`, `backfill_status`, `backfill_from`, `backfill_through`, `backfill_next`, `backfill_ledger`, `backfill_direction`, `network_id`.
 
 ### `ledgers`
 

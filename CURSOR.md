@@ -52,7 +52,7 @@ src/
   ingester/
     index.ts        — WebSocket lifecycle manager
     snapshot.ts     — ledger_data walk + resume; retarget if L is gone
-    backfill.ts     — optional historical tx walk (trades + URIToken transfers)
+    backfill.ts     — optional historical tx walk, snapshot → FROM (trades + URIToken transfers)
     ledger.ts       — ledger_closed handler, orchestrates batch processing
     tokens.ts       — IOU trust-line ingestion
     uritokens.ts    — URIToken lifecycle
@@ -134,10 +134,11 @@ Copy `.env.example` to `.env`. Never commit `.env`.
 - `DB_PATH` — default `./data/xahauindex.db`
 - `API_PORT` / `API_HOST` — default `3000` / `0.0.0.0`
 - `LOG_LEVEL` — `trace|debug|info|warn|error`
-- `BACKFILL_FROM_LEDGER` — optional absolute start (`genesis`/`start` = `1`). Alias: `FULL_HISTORY_START`.
-- `BACKFILL_LOOKBACK` — if `FROM` is unset, start at `snapshot - lookback + 1`. Neither set = no backfill.
+- `BACKFILL_FROM_LEDGER` — optional earliest ledger the walk stops at (`genesis`/`start` = `1`). Alias: `FULL_HISTORY_START`.
+- `BACKFILL_LOOKBACK` — if `FROM` is unset, stop at `snapshot - lookback + 1`. Neither set = no backfill. Walk is snapshot → FROM.
 - `BACKFILL_XAHAUD_URL` — optional dedicated history node (`ws`/`wss` or `http`/`https` JSON-RPC). Unset = reuse `XAHAUD_URL`.
 - `BACKFILL_ENV` — optional second env file for that node URL. Auto-loads `.env.backfill` when present.
+- `BACKFILL_MIN_INTERVAL_MS` — delay between historical fetches. Unset = `2000` when sharing the live node (public RPC quotas), `0` on a dedicated history URL. A shared node also gives live fetches priority and pauses backfill after `tooBusy`.
 
 ## Running locally
 
@@ -167,7 +168,7 @@ Out: auth/rate limiting · Governance Game · multi-node federation · icon CDN 
 
 Icon URLs come from remarks, issuer TOML, or URI metadata JSON. Persist the URL string only — never download, store, or proxy image bytes. `data:` URIs are rejected. When a URIToken URI is HTTPS JSON metadata, store that JSON on the token as well.
 
-History mode must not overwrite snapshot balances, owners, issuers, or Hooks. It records DEX trades and URIToken transfers only.
+History mode must not overwrite snapshot balances, owners, issuers, or Hooks. It records DEX trades and URIToken transfers only. The walk starts at the snapshot ledger and decrements to `FROM` / genesis so recent candles exist first.
 
 ---
 

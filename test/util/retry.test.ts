@@ -20,6 +20,24 @@ describe('retry', () => {
     assert.equal(attempts, 3);
   });
 
+  it('does not consume attempts on a rate-limit tooBusy', async () => {
+    let attempts = 0;
+    const error = new Error('rate limit: units quota (50000 per 10s) exhausted, retry in ~1ms');
+    error.name = 'RippledError';
+    const value = await retry(
+      async () => {
+        attempts += 1;
+        if (attempts < 3) {
+          throw error;
+        }
+        return 4;
+      },
+      { minMs: 1, maxMs: 2, attempts: 1 },
+    );
+    assert.equal(value, 4);
+    assert.equal(attempts, 3);
+  });
+
   it('throws after the last attempt', async () => {
     await assert.rejects(
       () =>

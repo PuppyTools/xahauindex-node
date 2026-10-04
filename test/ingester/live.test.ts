@@ -157,4 +157,40 @@ describe('followLive', () => {
     controller.abort();
     await running;
   });
+
+  it('retries subscribe after a public-node rate limit', async () => {
+    const db = memoryDb();
+    seedLiveFrom(db, 10);
+    let subscribes = 0;
+    const source: LiveLedgerSource = {
+      getValidatedLedger: async () => ({
+        index: 11,
+        hash: 'a'.repeat(64),
+        closeTime: 1_700_000_011,
+      }),
+      getLedgerDataPage: async () => ({ state: [] }),
+      getLedgerWithTransactions: async (index) => emptyLedger(index),
+      subscribeLedgers: async () => {
+        subscribes += 1;
+        if (subscribes === 1) {
+          throw new Error('rate limit: units quota (50000 per 10s) exhausted, retry in ~1ms');
+        }
+      },
+      onLedgerClosed: () => () => undefined,
+    };
+    const controller = new AbortController();
+    const running = followLive({
+      db,
+      source,
+      runtime: testRuntime(),
+      log: silentLog,
+      signal: controller.signal,
+      retryMinMs: 1,
+    });
+    await waitUntil(() => subscribes >= 2);
+    controller.abort();
+    await running;
+    assert.equal(subscribes, 2);
+    assert.equal(getLatestLedgerIndex(db), 11);
+  });
 });

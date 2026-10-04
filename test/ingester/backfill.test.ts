@@ -9,7 +9,12 @@ import { getUriToken, listUriTokenTransfers, upsertUriToken } from '../../src/db
 import { createServer } from 'node:http';
 import type { AddressInfo } from 'node:net';
 
-import { runBackfill } from '../../src/ingester/backfill.js';
+import {
+  BACKFILL_DIRECTION,
+  backfillProgress,
+  resumeBackfillIndex,
+  runBackfill,
+} from '../../src/ingester/backfill.js';
 import { runDedicatedBackfill } from '../../src/ingester/index.js';
 import { applyClosedLedger, applyHistoricalLedger } from '../../src/ingester/ledger.js';
 import type { ClosedLedger } from '../../src/ingester/source.js';
@@ -302,7 +307,7 @@ describe('runBackfill', () => {
     assert.equal(getIndexerState(db, 'backfill_status'), undefined);
   });
 
-  it('walks FROM through the snapshot, skips missing ledgers, and resumes', async () => {
+  it('walks the snapshot down to FROM, skips missing ledgers, and resumes', async () => {
     const db = memoryDb();
     seedSnapshot(db, 10);
     const requested: number[] = [];
@@ -327,10 +332,11 @@ describe('runBackfill', () => {
     assert.equal(result.through, 10);
     assert.equal(result.applied, 2);
     assert.equal(result.skippedLedgers, 1);
-    assert.deepEqual(requested, [8, 9, 9, 10]);
+    assert.deepEqual(requested, [10, 9, 9, 8]);
     assert.equal(getIndexerState(db, 'backfill_status'), 'complete');
     assert.equal(getIndexerState(db, 'backfill_from'), '8');
-    assert.equal(getIndexerState(db, 'backfill_next'), '11');
+    assert.equal(getIndexerState(db, 'backfill_direction'), BACKFILL_DIRECTION);
+    assert.equal(getIndexerState(db, 'backfill_next'), '7');
     assert.equal(getLatestLedgerIndex(db), 10);
     assert.equal(
       listDexTrades(
@@ -357,9 +363,132 @@ describe('runBackfill', () => {
     assert.deepEqual(requested, []);
 
     setIndexerState(db, 'backfill_status', 'running');
-    setIndexerState(db, 'backfill_next', '10');
+    setIndexerState(db, 'backfill_next', '9');
     requested.length = 0;
     const resumed = await runBackfill({
+      db,
+      config: testConfig({ backfillFromLedger: 8 }),
+      log: silentLog,
+      fetchAttempts: 2,
+      retryMinMs: 1,
+      source: {
+        getLedgerWithTransactions: async (index) => {
+          requested.push(index);
+          if (index === 9) {
+            throw new Error('ledger not found');
+          }
+          return closedLedger(index, []);
+        },
+      },
+    });
+    assert.equal(resumed.skipped, false);
+    assert.deepEqual(requested, [9, 9, 8]);
+    assert.equal(getIndexerState(db, 'backfill_status'), 'complete');
+  });
+
+  it('continues downward when FROM is lowered after a completed range', async () => {
+    const db = memoryDb();
+    seedSnapshot(db, 12);
+    const requested: number[] = [];
+    await runBackfill({
+      db,
+      config: testConfig({ backfillFromLedger: 11 }),
+      log: silentLog,
+      source: {
+        getLedgerWithTransactions: async (index) => {
+          requested.push(index);
+          return closedLedger(index, []);
+        },
+      },
+    });
+    assert.deepEqual(requested, [12, 11]);
+    assert.equal(getIndexerState(db, 'backfill_status'), 'complete');
+
+    requested.length = 0;
+    const extended = await runBackfill({
+      db,
+      config: testConfig({ backfillFromLedger: 9 }),
+      log: silentLog,
+      source: {
+        getLedgerWithTransactions: async (index) => {
+          requested.push(index);
+          return closedLedger(index, []);
+        },
+      },
+    });
+    assert.equal(extended.skipped, false);
+    assert.equal(extended.from, 9);
+    assert.deepEqual(requested, [10, 9]);
+    assert.equal(getIndexerState(db, 'backfill_status'), 'complete');
+    assert.equal(getIndexerState(db, 'backfill_from'), '9');
+    assert.equal(getIndexerState(db, 'backfill_next'), '8');
+  });
+
+  it('retries a rate-limited ledger instead of skipping it', async () => {
+    const db = memoryDb();
+    seedSnapshot(db, 5);
+    let hits = 0;
+    const result = await runBackfill({
+      db,
+      config: testConfig({ backfillFromLedger: 5 }),
+      log: silentLog,
+      fetchAttempts: 1,
+      retryMinMs: 1,
+      source: {
+        getLedgerWithTransactions: async (index) => {
+          if (index === 5) {
+            hits += 1;
+            if (hits < 3) {
+              throw new Error('rate limit: units quota (50000 per 10s) exhausted, retry in ~1ms');
+            }
+          }
+          return closedLedger(index, []);
+        },
+      },
+    });
+    assert.equal(result.skipped, false);
+    assert.equal(result.applied, 1);
+    assert.equal(result.skippedLedgers, 0);
+    assert.equal(hits, 3);
+  });
+
+  it('logs backward progress with remaining ledgers', async () => {
+    const db = memoryDb();
+    seedSnapshot(db, 5);
+    const messages: Array<{ msg: string; remaining?: number; next?: number }> = [];
+    await runBackfill({
+      db,
+      config: testConfig({ backfillFromLedger: 4 }),
+      log: {
+        ...silentLog,
+        info: (obj, msg) => {
+          messages.push({
+            msg,
+            remaining: typeof obj.remaining === 'number' ? obj.remaining : undefined,
+            next: typeof obj.next === 'number' ? obj.next : undefined,
+          });
+        },
+      },
+      source: {
+        getLedgerWithTransactions: async (index) => closedLedger(index, []),
+      },
+    });
+    assert.equal(messages[0]?.msg, 'historical backfill starting (snapshot → FROM)');
+    assert.equal(messages[0]?.remaining, 2);
+    assert.ok(messages.some((entry) => entry.msg === 'historical backfill progress'));
+    assert.equal(messages.at(-1)?.msg, 'historical backfill complete');
+    assert.equal(messages.at(-1)?.remaining, 0);
+  });
+
+  it('restarts an old forward walk at the snapshot', async () => {
+    const db = memoryDb();
+    seedSnapshot(db, 12);
+    setIndexerState(db, 'backfill_status', 'running');
+    setIndexerState(db, 'backfill_from', '8');
+    setIndexerState(db, 'backfill_through', '12');
+    setIndexerState(db, 'backfill_next', '9');
+    const requested: number[] = [];
+    const result = await runBackfill({
       db,
       config: testConfig({ backfillFromLedger: 8 }),
       log: silentLog,
@@ -370,9 +499,80 @@ describe('runBackfill', () => {
         },
       },
     });
-    assert.equal(resumed.skipped, false);
-    assert.deepEqual(requested, [10]);
-    assert.equal(getIndexerState(db, 'backfill_status'), 'complete');
+    assert.equal(result.skipped, false);
+    assert.deepEqual(requested, [12, 11, 10, 9, 8]);
+    assert.equal(getIndexerState(db, 'backfill_direction'), BACKFILL_DIRECTION);
+    assert.equal(getIndexerState(db, 'backfill_next'), '7');
+  });
+});
+
+describe('backfillProgress', () => {
+  it('counts remaining ledgers while walking down from the snapshot', () => {
+    assert.deepEqual(backfillProgress(1, 100, 100), {
+      from: 1,
+      through: 100,
+      next: 100,
+      remaining: 100,
+      done: 0,
+      pct: 0,
+      direction: BACKFILL_DIRECTION,
+    });
+    assert.deepEqual(backfillProgress(1, 100, 50), {
+      from: 1,
+      through: 100,
+      next: 50,
+      remaining: 50,
+      done: 50,
+      pct: 50,
+      direction: BACKFILL_DIRECTION,
+    });
+    assert.deepEqual(backfillProgress(1, 100, 0), {
+      from: 1,
+      through: 100,
+      next: 0,
+      remaining: 0,
+      done: 100,
+      pct: 100,
+      direction: BACKFILL_DIRECTION,
+    });
+  });
+});
+
+describe('resumeBackfillIndex', () => {
+  it('starts at the snapshot unless a backward cursor exists', () => {
+    assert.equal(
+      resumeBackfillIndex({
+        from: 1,
+        through: 20,
+        storedFrom: null,
+        storedNext: null,
+        storedStatus: undefined,
+        storedDirection: undefined,
+      }),
+      20,
+    );
+    assert.equal(
+      resumeBackfillIndex({
+        from: 1,
+        through: 20,
+        storedFrom: 1,
+        storedNext: 14,
+        storedStatus: 'running',
+        storedDirection: BACKFILL_DIRECTION,
+      }),
+      14,
+    );
+    assert.equal(
+      resumeBackfillIndex({
+        from: 1,
+        through: 20,
+        storedFrom: 8,
+        storedNext: 21,
+        storedStatus: 'complete',
+        storedDirection: undefined,
+      }),
+      7,
+    );
   });
 });
 
@@ -429,7 +629,7 @@ describe('runDedicatedBackfill', () => {
         log: silentLog,
       });
       assert.equal(result.skipped, false);
-      assert.deepEqual(requested, [11, 12]);
+      assert.deepEqual(requested, [12, 11]);
       assert.equal(getIndexerState(db, 'backfill_status'), 'complete');
     } finally {
       await new Promise<void>((resolve, reject) => {

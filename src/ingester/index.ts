@@ -1,6 +1,11 @@
 import { publishLedgerEvents } from '../api/publish.js';
 import type { EventHub } from '../api/hub.js';
-import { resolveBackfillFrom, resolveBackfillSourceUrl, type Config } from '../config.js';
+import {
+  resolveBackfillFrom,
+  resolveBackfillMinIntervalMs,
+  resolveBackfillSourceUrl,
+  type Config,
+} from '../config.js';
 import type { SqliteDatabase } from '../db/client.js';
 import type { Runtime } from '../runtime.js';
 import { runBackfill, type BackfillResult } from './backfill.js';
@@ -72,7 +77,22 @@ export async function startIngester(options: {
       log: options.log,
       ...(options.signal === undefined ? {} : { signal: options.signal }),
     });
-    await Promise.all([live, toml, uriMeta, backfill]);
+    const settle = async (worker: string, task: Promise<unknown>): Promise<void> => {
+      try {
+        await task;
+      } catch (error) {
+        if (options.signal?.aborted) {
+          return;
+        }
+        options.log.error({ err: error, worker }, 'ingester worker failed');
+      }
+    };
+    await Promise.all([
+      settle('live', live),
+      settle('toml', toml),
+      settle('uriMeta', uriMeta),
+      settle('backfill', backfill),
+    ]);
   } finally {
     await source.disconnect();
   }
@@ -80,7 +100,7 @@ export async function startIngester(options: {
 
 export async function runDedicatedBackfill(options: {
   db: SqliteDatabase;
-  liveSource: Pick<XahauSource, 'getLedgerWithTransactions'>;
+  liveSource: Pick<XahauSource, 'getLedgerWithTransactions' | 'quota'>;
   config: Config;
   log: LiveLogger;
   signal?: AbortSignal;
@@ -92,14 +112,21 @@ export async function runDedicatedBackfill(options: {
   const from = snapshot >= 1 ? resolveBackfillFrom(options.config, snapshot) : null;
   const dedicated = from !== null && url !== options.config.xahaudUrl;
   const history = dedicated ? createBackfillSource(url) : null;
+  const minIntervalMs = resolveBackfillMinIntervalMs(options.config, dedicated);
   if (history) {
     await history.connect();
     options.log.info(
       {
         url,
+        minIntervalMs,
         ...(options.config.backfillEnvPath === null ? {} : { env: options.config.backfillEnvPath }),
       },
       'historical backfill using dedicated node',
+    );
+  } else if (from !== null && minIntervalMs > 0) {
+    options.log.info(
+      { minIntervalMs, url },
+      'historical backfill pacing shared live node to stay under public RPC quotas',
     );
   }
   try {
@@ -108,6 +135,7 @@ export async function runDedicatedBackfill(options: {
       source: history ?? options.liveSource,
       config: options.config,
       log: options.log,
+      minIntervalMs,
       ...(options.signal === undefined ? {} : { signal: options.signal }),
       ...(options.fetchAttempts === undefined ? {} : { fetchAttempts: options.fetchAttempts }),
       ...(options.retryMinMs === undefined ? {} : { retryMinMs: options.retryMinMs }),
