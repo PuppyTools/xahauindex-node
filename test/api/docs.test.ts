@@ -53,6 +53,10 @@ describe('API docs', () => {
     assert.match(docs.body, /curl -s '?http:\/\/localhost:3000\/v1\/tokens/);
     assert.match(docs.body, /curl -s '?http:\/\/localhost:3000\/v1\/uritokens/);
     assert.match(docs.body, /curl -s '?http:\/\/localhost:3000\/v1\/prices/);
+    assert.match(docs.body, />Status</);
+    assert.match(docs.body, />Data Range</);
+    assert.match(docs.body, /id="range"/);
+    assert.match(docs.body, /history_start_ledger/);
     assert.match(docs.body, /\/docs\/xi\.svg/);
     assert.match(docs.body, /rel="icon" href="\/docs\/favicon\.svg"/);
     assert.doesNotMatch(docs.body, /M24 3 43 14\.5/);
