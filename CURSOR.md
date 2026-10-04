@@ -65,11 +65,11 @@ src/
     index.ts        — Fastify plugin registration
     routes/         — one file per resource group (docs.ts serves / and /docs)
     schemas/        — TypeBox schemas for request params + response shapes
-public/docs/        — branded API docs page
   util/
     xahau.ts        — currency normalisation, account validation, hex helpers, blackhole
     domain.ts       — /.well-known/xrp-ledger.toml fetcher/parser
     retry.ts        — exponential backoff
+public/docs/        — branded API docs page
 dist/               — compiled output (gitignored)
 docs/
   implementation-plan.md
