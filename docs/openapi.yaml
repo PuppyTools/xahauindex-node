@@ -10,6 +10,8 @@ info:
     Token URLs use two path segments: `/v1/tokens/{currency}/{issuer}`.
     Pair URLs use `/v1/prices/{base}/{counter}` with issuer query params.
     Native asset code is `XAH`.
+    No API key. Operators may enable a per-IP HTTP limit (`API_RATE_LIMIT_MAX`);
+    over the limit the API returns `429` with `error.code` `RATE_LIMITED`.
   contact:
     url: https://github.com/PuppyTools/xahauindex-node
   license:
@@ -164,6 +166,7 @@ components:
             code:
               type: string
               example: NOT_FOUND
+              description: `NOT_FOUND`, `BAD_REQUEST`, `RATE_LIMITED`, or `INTERNAL`
             message:
               type: string
 
@@ -596,6 +599,23 @@ components:
         uptime_seconds:
           type: integer
 
+  responses:
+    RateLimited:
+      description: Operator rate limit exceeded
+      headers:
+        Retry-After:
+          description: Seconds until the client may retry
+          schema:
+            type: integer
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example:
+            error:
+              code: RATE_LIMITED
+              message: Too many requests
+
 paths:
   /v1/status:
     get:
@@ -614,6 +634,8 @@ paths:
                     $ref: '#/components/schemas/Status'
                   meta:
                     $ref: '#/components/schemas/Meta'
+        '429':
+          $ref: '#/components/responses/RateLimited'
 
   /v1/tokens:
     get:

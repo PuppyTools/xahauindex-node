@@ -17,3 +17,7 @@ export function notFound(message: string): ApiError {
 export function badRequest(message: string): ApiError {
   return new ApiError(400, 'BAD_REQUEST', message);
 }
+
+export function rateLimited(message = 'Too many requests'): ApiError {
+  return new ApiError(429, 'RATE_LIMITED', message);
+}

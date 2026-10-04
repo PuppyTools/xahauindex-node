@@ -14,6 +14,11 @@ export function testConfig(overrides: Partial<Config> = {}): Config {
     backfillXahaudUrl: null,
     backfillEnvPath: null,
     backfillMinIntervalMs: 0,
+    apiRateLimitMax: null,
+    apiRateLimitWindowMs: 60_000,
+    apiTrustProxy: false,
+    apiRateLimitAllow: [],
+    apiWsMaxPerIp: null,
     ...overrides,
   };
 }

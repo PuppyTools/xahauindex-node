@@ -1,6 +1,8 @@
 import type { FastifyPluginAsync } from 'fastify';
 
+import { resolveWsMaxPerIp } from '../../config.js';
 import { isStreamName, type HubClient, type StreamName } from '../hub.js';
+import { createWsConnectionTracker } from '../wsLimit.js';
 
 interface SubscribeMessage {
   command?: unknown;
@@ -21,7 +23,22 @@ function parseStreams(value: unknown): StreamName[] {
 }
 
 export const subscribeRoutes: FastifyPluginAsync = async (app) => {
-  app.get('/v1/subscribe', { websocket: true }, (socket) => {
+  const maxPerIp = resolveWsMaxPerIp(app.config);
+  const tracker = createWsConnectionTracker();
+
+  app.get('/v1/subscribe', { websocket: true }, (socket, request) => {
+    if (maxPerIp !== null && !tracker.tryAcquire(request.ip, maxPerIp)) {
+      socket.send(
+        JSON.stringify({
+          error: { code: 'RATE_LIMITED', message: 'Too many websocket connections' },
+        }),
+      );
+      setImmediate(() => {
+        socket.close();
+      });
+      return;
+    }
+
     const client: HubClient = {
       streams: new Set(),
       send: (payload) => {
@@ -57,6 +74,9 @@ export const subscribeRoutes: FastifyPluginAsync = async (app) => {
     });
 
     socket.on('close', () => {
+      if (maxPerIp !== null) {
+        tracker.release(request.ip);
+      }
       app.hub.remove(client);
     });
   });

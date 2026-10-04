@@ -101,4 +101,46 @@ describe('WS /v1/subscribe', () => {
     socket.close();
     await app.close();
   });
+
+  it('rejects a second subscribe socket from the same IP', async () => {
+    const db = memoryDb();
+    const app = await buildApi({
+      db,
+      config: testConfig({ apiWsMaxPerIp: 1 }),
+      runtime: testRuntime(),
+    });
+    await app.listen({ host: '127.0.0.1', port: 0 });
+    const address = app.server.address();
+    assert.ok(address && typeof address === 'object');
+    const url = `ws://127.0.0.1:${address.port}/v1/subscribe`;
+
+    const first = new WebSocket(url);
+    await new Promise<void>((resolve, reject) => {
+      first.addEventListener('open', () => resolve(), { once: true });
+      first.addEventListener('error', () => reject(new Error('first websocket failed')), { once: true });
+    });
+
+    const second = new WebSocket(url);
+    const limited = await new Promise<unknown>((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error('timed out waiting for websocket message')), 1_000);
+      second.addEventListener(
+        'message',
+        (event) => {
+          clearTimeout(timer);
+          resolve(JSON.parse(String(event.data)));
+        },
+        { once: true },
+      );
+      second.addEventListener('error', () => {
+        clearTimeout(timer);
+        reject(new Error('second websocket failed'));
+      }, { once: true });
+    });
+    assert.deepEqual(limited, {
+      error: { code: 'RATE_LIMITED', message: 'Too many websocket connections' },
+    });
+    first.close();
+    second.close();
+    await app.close();
+  });
 });

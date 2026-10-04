@@ -6,10 +6,13 @@ import { describe, it } from 'node:test';
 
 import {
   ConfigError,
+  DEFAULT_API_RATE_LIMIT_WINDOW_MS,
+  DEFAULT_WS_MAX_PER_IP,
   loadConfig,
   resolveBackfillFrom,
   resolveBackfillMinIntervalMs,
   resolveBackfillSourceUrl,
+  resolveWsMaxPerIp,
   SHARED_BACKFILL_INTERVAL_MS,
 } from '../src/config.js';
 
@@ -21,6 +24,12 @@ describe('loadConfig', () => {
     assert.equal(config.apiPort, 3000);
     assert.equal(config.apiHost, '0.0.0.0');
     assert.equal(config.logLevel, 'info');
+    assert.equal(config.apiRateLimitMax, null);
+    assert.equal(config.apiRateLimitWindowMs, DEFAULT_API_RATE_LIMIT_WINDOW_MS);
+    assert.equal(config.apiTrustProxy, false);
+    assert.deepEqual(config.apiRateLimitAllow, []);
+    assert.equal(config.apiWsMaxPerIp, null);
+    assert.equal(resolveWsMaxPerIp(config), null);
   });
 
   it('reads overrides from env', () => {
@@ -135,5 +144,47 @@ describe('loadConfig', () => {
   it('rejects a missing BACKFILL_ENV file and a bad backfill URL', () => {
     assert.throws(() => loadConfig({ BACKFILL_ENV: '/tmp/xahauindex-missing.env' }), ConfigError);
     assert.throws(() => loadConfig({ BACKFILL_XAHAUD_URL: 'ftp://history.example' }), ConfigError);
+  });
+
+  it('treats API_RATE_LIMIT_MAX 0 or unset as off', () => {
+    assert.equal(loadConfig({}).apiRateLimitMax, null);
+    assert.equal(loadConfig({ API_RATE_LIMIT_MAX: '0' }).apiRateLimitMax, null);
+    assert.equal(loadConfig({ API_RATE_LIMIT_MAX: '120' }).apiRateLimitMax, 120);
+  });
+
+  it('reads operator rate-limit knobs', () => {
+    const config = loadConfig({
+      API_RATE_LIMIT_MAX: '60',
+      API_RATE_LIMIT_WINDOW_MS: '15000',
+      API_TRUST_PROXY: 'true',
+      API_RATE_LIMIT_ALLOW: '127.0.0.1, 10.0.0.0/8',
+      API_WS_MAX_PER_IP: '4',
+    });
+    assert.equal(config.apiRateLimitMax, 60);
+    assert.equal(config.apiRateLimitWindowMs, 15_000);
+    assert.equal(config.apiTrustProxy, true);
+    assert.deepEqual(config.apiRateLimitAllow, ['127.0.0.1', '10.0.0.0/8']);
+    assert.equal(config.apiWsMaxPerIp, 4);
+    assert.equal(resolveWsMaxPerIp(config), 4);
+  });
+
+  it('inherits the websocket cap when only the HTTP limiter is on', () => {
+    const limited = loadConfig({ API_RATE_LIMIT_MAX: '30' });
+    assert.equal(resolveWsMaxPerIp(limited), DEFAULT_WS_MAX_PER_IP);
+    const explicitOff = loadConfig({
+      API_RATE_LIMIT_MAX: '30',
+      API_WS_MAX_PER_IP: '0',
+    });
+    assert.equal(resolveWsMaxPerIp(explicitOff), null);
+    const wsOnly = loadConfig({ API_WS_MAX_PER_IP: '2' });
+    assert.equal(wsOnly.apiRateLimitMax, null);
+    assert.equal(resolveWsMaxPerIp(wsOnly), 2);
+  });
+
+  it('rejects invalid rate-limit env', () => {
+    assert.throws(() => loadConfig({ API_RATE_LIMIT_MAX: '-1' }), ConfigError);
+    assert.throws(() => loadConfig({ API_RATE_LIMIT_WINDOW_MS: '0' }), ConfigError);
+    assert.throws(() => loadConfig({ API_TRUST_PROXY: 'maybe' }), ConfigError);
+    assert.throws(() => loadConfig({ API_RATE_LIMIT_ALLOW: 'not-an-ip' }), ConfigError);
   });
 });

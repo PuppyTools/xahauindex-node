@@ -2,6 +2,8 @@ import { existsSync, readFileSync } from 'node:fs';
 
 import { config as loadDotenv, parse as parseDotenv } from 'dotenv';
 
+import { parseIpAllowlist } from './util/allowlist.js';
+
 export const LOG_LEVELS = ['trace', 'debug', 'info', 'warn', 'error'] as const;
 export type LogLevel = (typeof LOG_LEVELS)[number];
 
@@ -25,10 +27,23 @@ export interface Config {
   /** Second env file that supplied the backfill node URL, if any. */
   backfillEnvPath: string | null;
   /**
-   * Minimum delay between historical ledger fetches. `null` = 400ms when sharing
+   * Minimum delay between historical ledger fetches. `null` = 2000ms when sharing
    * the live node, 0 when using a dedicated backfill URL.
    */
   backfillMinIntervalMs: number | null;
+  /** HTTP requests per IP per window. `null` / `0` leaves the API unlimited. */
+  apiRateLimitMax: number | null;
+  /** Rate-limit window in milliseconds. */
+  apiRateLimitWindowMs: number;
+  /** Trust `X-Forwarded-For` only when a reverse proxy is in front. */
+  apiTrustProxy: boolean;
+  /** IPs / CIDRs that skip the HTTP limiter. */
+  apiRateLimitAllow: string[];
+  /**
+   * Concurrent `/v1/subscribe` sockets per IP. `null` inherits `8` when the
+   * HTTP limiter is on, or no cap when it is off. `0` disables the cap.
+   */
+  apiWsMaxPerIp: number | null;
 }
 
 export class ConfigError extends Error {
@@ -153,6 +168,8 @@ function readOptionalNonNegativeInt(env: NodeJS.ProcessEnv, key: string): number
 }
 
 export const SHARED_BACKFILL_INTERVAL_MS = 2_000;
+export const DEFAULT_API_RATE_LIMIT_WINDOW_MS = 60_000;
+export const DEFAULT_WS_MAX_PER_IP = 8;
 
 function readOptionalPositiveInt(env: NodeJS.ProcessEnv, key: string): number | null {
   const raw = env[key];
@@ -164,6 +181,45 @@ function readOptionalPositiveInt(env: NodeJS.ProcessEnv, key: string): number | 
     throw new ConfigError(`${key} must be an integer >= 1`);
   }
   return value;
+}
+
+function readBoolean(env: NodeJS.ProcessEnv, key: string, fallback: boolean): boolean {
+  const raw = env[key];
+  if (raw === undefined || raw.trim() === '') {
+    return fallback;
+  }
+  const normalized = raw.trim().toLowerCase();
+  if (normalized === 'true' || normalized === '1' || normalized === 'yes') {
+    return true;
+  }
+  if (normalized === 'false' || normalized === '0' || normalized === 'no') {
+    return false;
+  }
+  throw new ConfigError(`${key} must be true, false, 1, 0, yes, or no`);
+}
+
+function readRateLimitMax(env: NodeJS.ProcessEnv): number | null {
+  const value = readOptionalNonNegativeInt(env, 'API_RATE_LIMIT_MAX');
+  if (value === null || value === 0) {
+    return null;
+  }
+  return value;
+}
+
+function readRateLimitWindowMs(env: NodeJS.ProcessEnv): number {
+  return readOptionalPositiveInt(env, 'API_RATE_LIMIT_WINDOW_MS') ?? DEFAULT_API_RATE_LIMIT_WINDOW_MS;
+}
+
+function readRateLimitAllow(env: NodeJS.ProcessEnv): string[] {
+  const raw = env.API_RATE_LIMIT_ALLOW;
+  if (raw === undefined || raw.trim() === '') {
+    return [];
+  }
+  try {
+    return parseIpAllowlist(raw);
+  } catch (error) {
+    throw new ConfigError(error instanceof Error ? error.message : 'API_RATE_LIMIT_ALLOW is invalid');
+  }
 }
 
 function readBackfillFromLedger(env: NodeJS.ProcessEnv): number | null {
@@ -206,6 +262,13 @@ export function resolveBackfillMinIntervalMs(config: Config, dedicatedNode: bool
   return dedicatedNode ? 0 : SHARED_BACKFILL_INTERVAL_MS;
 }
 
+export function resolveWsMaxPerIp(config: Config): number | null {
+  if (config.apiWsMaxPerIp !== null) {
+    return config.apiWsMaxPerIp === 0 ? null : config.apiWsMaxPerIp;
+  }
+  return config.apiRateLimitMax === null ? null : DEFAULT_WS_MAX_PER_IP;
+}
+
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
   const backfillNode = readBackfillNode(env);
   return {
@@ -219,6 +282,11 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     backfillXahaudUrl: backfillNode.backfillXahaudUrl,
     backfillEnvPath: backfillNode.backfillEnvPath,
     backfillMinIntervalMs: readOptionalNonNegativeInt(env, 'BACKFILL_MIN_INTERVAL_MS'),
+    apiRateLimitMax: readRateLimitMax(env),
+    apiRateLimitWindowMs: readRateLimitWindowMs(env),
+    apiTrustProxy: readBoolean(env, 'API_TRUST_PROXY', false),
+    apiRateLimitAllow: readRateLimitAllow(env),
+    apiWsMaxPerIp: readOptionalNonNegativeInt(env, 'API_WS_MAX_PER_IP'),
   };
 }
 
