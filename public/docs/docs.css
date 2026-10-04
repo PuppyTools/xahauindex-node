@@ -55,7 +55,13 @@ a:hover { text-decoration: underline; }
   border-right: 1px solid var(--line);
   background: rgba(7, 18, 15, 0.88);
   backdrop-filter: blur(16px);
-  overflow: auto;
+  overflow-x: hidden;
+  overflow-y: auto;
+  scrollbar-width: none;
+}
+#sidebar::-webkit-scrollbar {
+  width: 0;
+  height: 0;
 }
 .brand {
   display: flex;

@@ -58,6 +58,9 @@ describe('API docs', () => {
     assert.match(docs.body, /href="http:\/\/localhost:3000\/v1\/status"/);
     assert.match(docs.body, />Status</);
     assert.match(docs.body, />Data Range</);
+    assert.match(docs.body, /id="node-status"/);
+    assert.match(docs.body, /<section id="status">/);
+    assert.doesNotMatch(docs.body, /<span id="status"/);
     assert.match(docs.body, /id="range"/);
     assert.match(docs.body, /history_start_ledger/);
     assert.match(docs.body, /\/docs\/xi\.svg/);
