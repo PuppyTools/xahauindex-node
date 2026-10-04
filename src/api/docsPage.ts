@@ -355,14 +355,14 @@ function renderTry(spec: OpenApiSpec, config?: Config): string {
     ws === null
       ? ''
       : `<li><code>/v1/subscribe</code> — ${ws.toLocaleString('en-US')} concurrent sockets per IP</li>`;
-  return `<aside class="try">
+  return `<div class="limits">
         <h3>${escapeHtml(title)}</h3>
         <p>${inlineMarkdown(body)}</p>
         <ul>
           <li>HTTP — ${config.apiRateLimitMax.toLocaleString('en-US')} requests per IP every ${escapeHtml(window)}</li>
           ${wsLine}
         </ul>
-      </aside>`;
+      </div>`;
 }
 
 export function renderDocsHtml(spec: OpenApiSpec, config?: Config): string {

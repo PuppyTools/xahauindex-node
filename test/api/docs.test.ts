@@ -114,10 +114,13 @@ describe('API docs', () => {
 
     const docs = await app.inject({ method: 'GET', url: '/docs' });
     assert.equal(docs.statusCode, 200);
+    assert.match(docs.body, /<div class="limits">/);
     assert.match(docs.body, /Try this node/);
     assert.match(docs.body, /Feel free to test this instance/);
     assert.match(docs.body, /120 requests per IP every 1 minute/);
     assert.match(docs.body, /8 concurrent sockets per IP/);
+    assert.doesNotMatch(docs.body, /<aside class="try"/);
+    assert.doesNotMatch(docs.body, /<aside class="limits"/);
 
     await app.close();
   });

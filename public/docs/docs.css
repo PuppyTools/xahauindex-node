@@ -47,7 +47,7 @@ a:hover { text-decoration: underline; }
   grid-template-columns: var(--sidebar) 1fr;
   min-height: 100vh;
 }
-aside {
+#sidebar {
   position: sticky;
   top: 0;
   height: 100vh;
@@ -166,7 +166,7 @@ h2 {
 .donate code {
   color: var(--teal);
 }
-.try {
+.limits {
   margin: 22px 0 0;
   max-width: 720px;
   padding: 16px 18px;
@@ -174,22 +174,22 @@ h2 {
   border-radius: var(--radius);
   background: var(--panel);
 }
-.try h3 {
+.limits h3 {
   margin: 0 0 6px;
   font-size: 16px;
 }
-.try p {
+.limits p {
   margin: 0 0 10px;
   color: var(--muted);
   font-size: 14px;
 }
-.try ul {
+.limits ul {
   margin: 0;
   padding-left: 18px;
   color: var(--text);
   font-size: 14px;
 }
-.try li + li { margin-top: 4px; }
+.limits li + li { margin-top: 4px; }
 section { margin: 56px 0; scroll-margin-top: 24px; }
 h3 {
   margin: 0 0 8px;
@@ -336,14 +336,14 @@ footer {
 }
 @media (max-width: 920px) {
   .app { grid-template-columns: 1fr; }
-  aside {
+  #sidebar {
     display: none;
     position: fixed;
     inset: 0 auto 0 0;
     width: min(84vw, 320px);
     z-index: 4;
   }
-  aside.open { display: block; }
+  #sidebar.open { display: block; }
   .menu { display: block; }
   main { padding: 72px 18px 64px; }
   .grid { grid-template-columns: 1fr; }
