@@ -51,7 +51,7 @@ src/
     queries/        — tokens.ts, uritokens.ts, issuers.ts, dex.ts, hooks.ts, remarks.ts
   ingester/
     index.ts        — WebSocket lifecycle manager
-    snapshot.ts     — ledger_data walk + resume
+    snapshot.ts     — ledger_data walk + resume; retarget if L is gone
     backfill.ts     — optional historical tx walk (trades + URIToken transfers)
     ledger.ts       — ledger_closed handler, orchestrates batch processing
     tokens.ts       — IOU trust-line ingestion
