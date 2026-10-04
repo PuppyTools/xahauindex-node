@@ -59,7 +59,7 @@ src/
     hooks.ts        — Hook state tracking
     remarks.ts      — Remarks decoder + SetRemarks apply
     metadata.ts     — URI metadata JSON → icon URL (no image bytes)
-    issuers.ts      — issuer profile + domain TOML (ACCOUNTS / ISSUERS / TOKENS)
+    issuers.ts      — issuer profile + Xahau xahau.toml (ACCOUNTS / CURRENCIES)
     dex.ts          — DEX executions → OHLCV candles
   api/
     index.ts        — Fastify plugin registration
@@ -67,7 +67,7 @@ src/
     schemas/        — TypeBox schemas for request params + response shapes
   util/
     xahau.ts        — currency normalisation, account validation, hex helpers, blackhole
-    domain.ts       — /.well-known/xrp-ledger.toml fetcher/parser
+    domain.ts       — /.well-known/xahau.toml fetcher/parser
     retry.ts        — exponential backoff
 public/docs/        — branded API docs page
 dist/               — compiled output (gitignored)

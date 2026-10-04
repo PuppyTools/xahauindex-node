@@ -27,12 +27,15 @@ interface TomlLinkDraft {
   title?: string;
 }
 
-export interface XrpLedgerToml {
+export interface XahauToml {
   accounts: TomlAccount[];
   issuers: TomlAccount[];
   tokens: TomlToken[];
+  currencies: TomlToken[];
   weblinks: TomlLinkDraft[];
+  socials: string[];
   organization: {
+    name?: string;
     website?: string;
     twitter?: string;
   };
@@ -42,6 +45,8 @@ export interface XrpLedgerToml {
     icon?: string;
   };
 }
+
+export const XAHAU_TOML_PATH = '/.well-known/xahau.toml';
 
 const LINK_TABLES = new Set(['WEBLINKS', 'TOKENS.WEBLINKS', 'TOKENS.URLS']);
 const TOML_LINK_LIMIT = 20;
@@ -130,7 +135,7 @@ function unquote(value: string): string {
 }
 
 function assignMetadata(
-  target: XrpLedgerToml['metadata'],
+  target: XahauToml['metadata'],
   key: string,
   value: string,
 ): void {
@@ -177,24 +182,36 @@ function assignLinkField(target: TomlLinkDraft, key: string, value: string): voi
   }
 }
 
+function isSocialKey(key: string): boolean {
+  return key === 'twitter' || key === 'x' || key.startsWith('social');
+}
+
 function assignOrganizationField(
-  target: XrpLedgerToml['organization'],
+  target: XahauToml['organization'],
+  socials: string[],
   key: string,
   value: string,
 ): void {
-  if (key === 'website' || key === 'url') {
+  if (key === 'name') {
+    target.name = value;
+  } else if (key === 'website' || key === 'url') {
     target.website = value;
-  } else if (key === 'twitter' || key === 'x') {
-    target.twitter = value;
+  } else if (isSocialKey(key)) {
+    socials.push(value);
+    if (target.twitter === undefined && (key === 'twitter' || key === 'x')) {
+      target.twitter = value;
+    }
   }
 }
 
-export function parseXrpLedgerToml(text: string): XrpLedgerToml {
-  const toml: XrpLedgerToml = {
+export function parseXahauToml(text: string): XahauToml {
+  const toml: XahauToml = {
     accounts: [],
     issuers: [],
     tokens: [],
+    currencies: [],
     weblinks: [],
+    socials: [],
     organization: {},
     metadata: {},
   };
@@ -220,9 +237,9 @@ export function parseXrpLedgerToml(text: string): XrpLedgerToml {
       } else if (section === 'ISSUERS') {
         currentAccount = {};
         toml.issuers.push(currentAccount);
-      } else if (section === 'TOKENS') {
+      } else if (section === 'TOKENS' || section === 'CURRENCIES') {
         currentToken = {};
-        toml.tokens.push(currentToken);
+        (section === 'CURRENCIES' ? toml.currencies : toml.tokens).push(currentToken);
       } else if (LINK_TABLES.has(section)) {
         currentLink = {};
         toml.weblinks.push(currentLink);
@@ -247,7 +264,7 @@ export function parseXrpLedgerToml(text: string): XrpLedgerToml {
       assignAccountField(currentAccount, key, value);
       continue;
     }
-    if (section === 'TOKENS' && currentToken) {
+    if ((section === 'TOKENS' || section === 'CURRENCIES') && currentToken) {
       assignTokenField(currentToken, key, value);
       continue;
     }
@@ -256,7 +273,15 @@ export function parseXrpLedgerToml(text: string): XrpLedgerToml {
       continue;
     }
     if (section === 'ORGANIZATION') {
-      assignOrganizationField(toml.organization, key, value);
+      assignOrganizationField(toml.organization, toml.socials, key, value);
+      continue;
+    }
+    if (section === 'PRINCIPALS' && isSocialKey(key)) {
+      toml.socials.push(value);
+      continue;
+    }
+    if (section === 'PRINCIPALS' && (key === 'website' || key === 'url')) {
+      assignOrganizationField(toml.organization, toml.socials, 'website', value);
       continue;
     }
     if (section === 'METADATA') {
@@ -270,25 +295,28 @@ function addressMatches(value: string | undefined, account: string): boolean {
   return value !== undefined && value.toLowerCase() === account.toLowerCase();
 }
 
-export function isAccountListed(toml: XrpLedgerToml, account: string): boolean {
+export function isAccountListed(toml: XahauToml, account: string): boolean {
   return (
     toml.accounts.some((entry) => addressMatches(entry.address, account)) ||
     toml.issuers.some((entry) => addressMatches(entry.address, account)) ||
+    toml.currencies.some((entry) => addressMatches(entry.issuer, account)) ||
     toml.tokens.some((entry) => addressMatches(entry.issuer, account))
   );
 }
 
 export function pickTomlProfile(
-  toml: XrpLedgerToml,
+  toml: XahauToml,
   account: string,
 ): { name?: string; description?: string; icon?: string } {
   const entry =
     toml.issuers.find((item) => addressMatches(item.address, account)) ??
     toml.accounts.find((item) => addressMatches(item.address, account));
-  const token = toml.tokens.find((item) => addressMatches(item.issuer, account));
-  const name = entry?.name ?? token?.name ?? toml.metadata.name;
-  const description = entry?.desc ?? token?.desc ?? toml.metadata.description;
-  const icon = entry?.icon ?? token?.icon ?? toml.metadata.icon;
+  const issued =
+    toml.currencies.find((item) => addressMatches(item.issuer, account)) ??
+    toml.tokens.find((item) => addressMatches(item.issuer, account));
+  const name = entry?.name ?? issued?.name ?? toml.organization.name ?? toml.metadata.name;
+  const description = entry?.desc ?? issued?.desc ?? toml.metadata.description;
+  const icon = entry?.icon ?? issued?.icon ?? toml.metadata.icon;
   return {
     ...(name === undefined ? {} : { name }),
     ...(description === undefined ? {} : { description }),
@@ -371,7 +399,19 @@ function pushTomlLink(links: TomlLink[], seen: Set<string>, draft: TomlLinkDraft
   });
 }
 
-export function pickTomlLinks(toml: XrpLedgerToml): TomlLink[] {
+function pushSocialValue(links: TomlLink[], seen: Set<string>, raw: string): void {
+  const asUrl = normalizePublicUrl(raw);
+  if (asUrl) {
+    pushTomlLink(links, seen, { url: asUrl, type: 'social' });
+    return;
+  }
+  const url = twitterUrl(raw);
+  if (url) {
+    pushTomlLink(links, seen, { url, type: 'social', title: 'Twitter' });
+  }
+}
+
+export function pickTomlLinks(toml: XahauToml): TomlLink[] {
   const links: TomlLink[] = [];
   const seen = new Set<string>();
   for (const draft of toml.weblinks) {
@@ -380,11 +420,11 @@ export function pickTomlLinks(toml: XrpLedgerToml): TomlLink[] {
   if (toml.organization.website) {
     pushTomlLink(links, seen, { url: toml.organization.website, type: 'website', title: 'Website' });
   }
+  for (const social of toml.socials) {
+    pushSocialValue(links, seen, social);
+  }
   if (toml.organization.twitter) {
-    const url = twitterUrl(toml.organization.twitter);
-    if (url) {
-      pushTomlLink(links, seen, { url, type: 'social', title: 'Twitter' });
-    }
+    pushSocialValue(links, seen, toml.organization.twitter);
   }
   return links;
 }
@@ -491,7 +531,19 @@ export async function fetchPublicHttpsText(
   }
 }
 
-export async function fetchXrpLedgerToml(
+export function isTomlDocument(text: string, contentType = ''): boolean {
+  const type = contentType.toLowerCase();
+  if (type.includes('text/html') || type.includes('application/xhtml')) {
+    return false;
+  }
+  const trimmed = text.trim();
+  if (trimmed === '' || /^<!DOCTYPE/i.test(trimmed) || /^<html[\s>]/i.test(trimmed)) {
+    return false;
+  }
+  return true;
+}
+
+export async function fetchXahauToml(
   domain: string,
   fetchImpl: typeof fetch = fetch,
 ): Promise<string> {
@@ -500,17 +552,20 @@ export async function fetchXrpLedgerToml(
     throw new Error(`Refusing TOML host ${host}`);
   }
   try {
-    const fetched = await fetchPublicHttpsText(`https://${host}/.well-known/xrp-ledger.toml`, {
+    const fetched = await fetchPublicHttpsText(`https://${host}${XAHAU_TOML_PATH}`, {
       maxBytes: TOML_MAX_BYTES,
       timeoutMs: TOML_TIMEOUT_MS,
-      accept: 'text/plain, application/toml, */*',
+      accept: 'application/toml, text/plain, */*',
       fetchImpl,
     });
+    if (!isTomlDocument(fetched.text, fetched.contentType)) {
+      throw new Error('TOML HTTP 404');
+    }
     return fetched.text;
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    if (message.startsWith('HTTP ')) {
-      throw new Error(`TOML ${message}`, { cause: error });
+    if (message.startsWith('HTTP ') || message.startsWith('TOML HTTP ')) {
+      throw new Error(message.startsWith('TOML ') ? message : `TOML ${message}`, { cause: error });
     }
     if (message.startsWith('Host ')) {
       throw new Error(`TOML host ${message.slice('Host '.length)}`, { cause: error });

@@ -4,118 +4,133 @@ import { describe, it } from 'node:test';
 import {
   assertSafeTomlHost,
   fetchPublicHttpsText,
+  fetchXahauToml,
   isExpectedTomlFailure,
   isFetchableTomlDomain,
   isAccountListed,
-  parseXrpLedgerToml,
+  isTomlDocument,
+  parseXahauToml,
   pickTomlLinks,
   pickTomlProfile,
   TOML_USER_AGENT,
+  XAHAU_TOML_PATH,
 } from '../../src/util/domain.js';
 
-const SAMPLE = `
-# comment
+const XAHAU_SAMPLE = `
 [METADATA]
-name = "Example"
-desc = "A test issuer"
-icon = "https://example.com/icon.png"
+modified = 2025-08-04T14:24:34.123Z
+
+[ORGANIZATION]
+name = "A Company B.V."
+website = "https://example.com"
+social_1 = "https://www.linkedin.com/company/incfintech"
+x = "@IncFinTech"
+
+[[PRINCIPALS]]
+name = "A. Person"
+social_1 = "https://x.com/IncFinTech"
 
 [[ACCOUNTS]]
 address = "rHb9CJAWyB4rj91VRWn96DkukG4bwdtyTh"
-name = "Treasury"
+network = "21337"
+desc = "This wallet is used for client deposits."
+
+[[CURRENCIES]]
+code = "USD"
+issuer = "rHb9CJAWyB4rj91VRWn96DkukG4bwdtyTh"
+symbol = "$"
+network = "21337"
 `;
 
-describe('xrp-ledger.toml', () => {
-  it('parses accounts and metadata', () => {
-    const toml = parseXrpLedgerToml(SAMPLE);
-    assert.equal(toml.metadata.name, 'Example');
+describe('xahau.toml', () => {
+  it('parses the Xahau identity sections and verifies [[ACCOUNTS]] / [[CURRENCIES]]', () => {
+    const toml = parseXahauToml(XAHAU_SAMPLE);
+    assert.equal(toml.organization.name, 'A Company B.V.');
     assert.equal(isAccountListed(toml, 'rHb9CJAWyB4rj91VRWn96DkukG4bwdtyTh'), true);
     assert.equal(isAccountListed(toml, 'rPT1Sjq2YGrBMTttX4GZHjKu9dyfzbpAYe'), false);
     const profile = pickTomlProfile(toml, 'rHb9CJAWyB4rj91VRWn96DkukG4bwdtyTh');
-    assert.equal(profile.name, 'Treasury');
-    assert.equal(profile.icon, 'https://example.com/icon.png');
-  });
-
-  it('treats ISSUERS and TOKENS rows as domain verification', () => {
-    const toml = parseXrpLedgerToml(`
-[[ISSUERS]]
-address = "rXmagwMmnFtVet3uL26Q2iwk287SRvVMJ"
-name = "Magnetic"
-
-[[TOKENS]]
-issuer = "rXmagwMmnFtVet3uL26Q2iwk287SRvVMJ"
-name = "Magnetic"
-icon = "https://xmagnetic.org/mag.png"
-
-[[TOKENS.WEBLINKS]]
-url = "https://xmagnetic.org"
-type = "website"
-title = "Official Website"
-
-[[TOKENS.WEBLINKS]]
-url = "https://twitter.com/MagneticXRPL"
-type = "socialmedia"
-`);
-    assert.equal(isAccountListed(toml, 'rXmagwMmnFtVet3uL26Q2iwk287SRvVMJ'), true);
-    assert.equal(toml.tokens.length, 1);
-    const profile = pickTomlProfile(toml, 'rXmagwMmnFtVet3uL26Q2iwk287SRvVMJ');
-    assert.equal(profile.name, 'Magnetic');
-    assert.equal(profile.icon, 'https://xmagnetic.org/mag.png');
+    assert.equal(profile.name, 'A Company B.V.');
+    assert.equal(profile.description, 'This wallet is used for client deposits.');
     const links = pickTomlLinks(toml);
     assert.deepEqual(links, [
-      { url: 'https://xmagnetic.org', type: 'website', title: 'Official Website' },
-      { url: 'https://twitter.com/MagneticXRPL', type: 'social', title: null },
+      { url: 'https://example.com', type: 'website', title: 'Website' },
+      { url: 'https://www.linkedin.com/company/incfintech', type: 'social', title: null },
+      { url: 'https://x.com/IncFinTech', type: 'social', title: 'Twitter' },
     ]);
   });
 
-  it('collects WEBLINKS, TOKENS.URLS, and ORGANIZATION socials', () => {
-    const toml = parseXrpLedgerToml(`
-[ORGANIZATION]
-website="https://transia.co"
-twitter="@angell_denis"
+  it('still reads custom ISSUERS / TOKENS / WEBLINKS when a xahau.toml includes them', () => {
+    const toml = parseXahauToml(`
+[[ISSUERS]]
+address = "rwUAi9ErV3wqgPdPj5qJdhBegJ3SPEvG9Y"
+name = "Xah Reinvest Fund #1"
+
+[[TOKENS]]
+issuer = "rwUAi9ErV3wqgPdPj5qJdhBegJ3SPEvG9Y"
+name = "Fund #1 LPT"
+icon = "https://xahinvest.com/icon.png"
 
 [[WEBLINKS]]
-url = "https://dex.xmerch.app"
+url = "https://xahinvest.com"
 type = "website"
-title = "xMerch"
-
-[[TOKENS.URLS]]
-url = "https://x.com/xMerch_"
-type = "social"
-title = "Twitter / X"
+title = "Official Website"
 `);
+    assert.equal(isAccountListed(toml, 'rwUAi9ErV3wqgPdPj5qJdhBegJ3SPEvG9Y'), true);
+    const profile = pickTomlProfile(toml, 'rwUAi9ErV3wqgPdPj5qJdhBegJ3SPEvG9Y');
+    assert.equal(profile.name, 'Xah Reinvest Fund #1');
+    assert.equal(profile.icon, 'https://xahinvest.com/icon.png');
     assert.deepEqual(pickTomlLinks(toml), [
-      { url: 'https://dex.xmerch.app', type: 'website', title: 'xMerch' },
-      { url: 'https://x.com/xMerch_', type: 'social', title: 'Twitter / X' },
-      { url: 'https://transia.co', type: 'website', title: 'Website' },
-      { url: 'https://x.com/angell_denis', type: 'social', title: 'Twitter' },
+      { url: 'https://xahinvest.com', type: 'website', title: 'Official Website' },
     ]);
   });
 
-  it('sends a product User-Agent and follows one safe redirect', async () => {
+  it('fetches only /.well-known/xahau.toml and rejects HTML stand-ins', async () => {
     const calls: string[] = [];
     const fetchImpl: typeof fetch = async (input, init) => {
       const url = String(input);
       calls.push(url);
       const headers = new Headers(init?.headers);
       assert.equal(headers.get('user-agent'), TOML_USER_AGENT);
+      assert.match(headers.get('accept') ?? '', /application\/toml/);
+      assert.equal(url.includes('xrp-ledger.toml'), false);
+      return new Response('[ORGANIZATION]\nname = "Evernode Ltd"\n', {
+        status: 200,
+        headers: { 'content-type': 'application/toml' },
+      });
+    };
+    const text = await fetchXahauToml('evernode.org', fetchImpl);
+    assert.match(text, /Evernode Ltd/);
+    assert.deepEqual(calls, [`https://evernode.org${XAHAU_TOML_PATH}`]);
+
+    const htmlFetch: typeof fetch = async () =>
+      new Response('<!doctype html><html lang="en">', {
+        status: 200,
+        headers: { 'content-type': 'text/html' },
+      });
+    await assert.rejects(fetchXahauToml('example.com', htmlFetch), /TOML HTTP 404/);
+    assert.equal(isTomlDocument('<!doctype html><html>', 'text/html'), false);
+    assert.equal(isTomlDocument('[ORGANIZATION]\nname = "Ok"\n', 'application/toml'), true);
+  });
+
+  it('follows one safe HTTPS redirect', async () => {
+    const calls: string[] = [];
+    const fetchImpl: typeof fetch = async (input) => {
+      const url = String(input);
+      calls.push(url);
       if (url.endsWith('/from')) {
         return new Response(null, {
           status: 301,
-          headers: { location: 'https://example.com/.well-known/xrp-ledger.toml' },
+          headers: { location: `https://example.com${XAHAU_TOML_PATH}` },
         });
       }
-      return new Response('[METADATA]\nname = "Redirected"\n', {
+      return new Response('[ORGANIZATION]\nname = "Redirected"\n', {
         status: 200,
-        headers: { 'content-type': 'text/plain' },
+        headers: { 'content-type': 'application/toml' },
       });
     };
     const fetched = await fetchPublicHttpsText('https://example.com/from', { fetchImpl });
     assert.equal(fetched.text.includes('Redirected'), true);
-    assert.deepEqual(calls, [
-      'https://example.com/from',
-      'https://example.com/.well-known/xrp-ledger.toml',
-    ]);
+    assert.deepEqual(calls, ['https://example.com/from', `https://example.com${XAHAU_TOML_PATH}`]);
   });
 
   it('rejects localhost and private hosts', () => {

@@ -117,7 +117,7 @@ Well-known keys (`name`, `description`, `image`, `icon`, `website`, `attributes`
 
 ### Issuers + TOML
 
-`account_info` → Domain hex (printable hostname only) → `https://<domain>/.well-known/xrp-ledger.toml`. Hex blobs and non-hostnames are stored if printable but never fetched. Verified if the r-address appears in `[[ACCOUNTS]]`, `[[ISSUERS]]`, or `[[TOKENS]]`. Re-check ~every 1000 ledgers and on Domain-changing `AccountSet`. Token issuers are checked before host-only domains. Expected fetch misses (NXDOMAIN, timeout, 404, bad cert, Cloudflare 403 without a document) are debug; a pass summary is info. Fetches send a product User-Agent so Cloudflare-backed sites can serve the file.
+`account_info` → Domain hex (printable hostname only) → `https://<domain>/.well-known/xahau.toml` ([Xahau identity spec](https://xahau.network/docs/infrastructure/identity/)). Never fetch `xrp-ledger.toml`. Hex blobs and non-hostnames are stored if printable but never fetched. Verified if the r-address appears in `[[ACCOUNTS]]` or `[[CURRENCIES]]` (custom `[[ISSUERS]]` / `[[TOKENS]]` in the same xahau.toml also count). Re-check ~every 1000 ledgers and on Domain-changing `AccountSet`. Token issuers are checked before host-only domains. Expected fetch misses (NXDOMAIN, timeout, 404, HTML stand-in, bad cert) are debug; a pass summary is info. Fetches send a product User-Agent so Cloudflare-backed sites can serve the file. Socials come from `[ORGANIZATION]` / `[[PRINCIPALS]]` (`website`, `x`, `social_*`) plus any custom `[[WEBLINKS]]` in that file.
 
 HTTPS only, timeout, size cap, no private-IP redirects.
 

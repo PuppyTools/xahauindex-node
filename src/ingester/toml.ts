@@ -8,11 +8,11 @@ import {
 import { fillTokenIconsFromIssuer, fillTokenTomlFromIssuer, syncTokenIssuerFlags } from '../db/queries/tokens.js';
 import type { IssuerRow } from '../types/db.js';
 import {
-  fetchXrpLedgerToml,
+  fetchXahauToml,
   isAccountListed,
   isExpectedTomlFailure,
   isFetchableTomlDomain,
-  parseXrpLedgerToml,
+  parseXahauToml,
   pickTomlLinks,
   pickTomlProfile,
   serializeTomlLinks,
@@ -22,7 +22,7 @@ import { sleep } from '../util/retry.js';
 import type { LiveLogger } from './live.js';
 
 export const TOML_REVERIFY_LEDGERS = 1000;
-export const TOML_LOGIC_VERSION = '2';
+export const TOML_LOGIC_VERSION = '3';
 export const TOML_PASS_CONCURRENCY = 6;
 
 export type TomlLoader = (domain: string) => Promise<string>;
@@ -34,7 +34,7 @@ export interface TomlVerifyResult {
 }
 
 function defaultLoader(domain: string): Promise<string> {
-  return fetchXrpLedgerToml(domain);
+  return fetchXahauToml(domain);
 }
 
 export async function verifyIssuerToml(options: {
@@ -69,7 +69,7 @@ export async function verifyIssuerToml(options: {
   const loader = options.loader ?? defaultLoader;
   try {
     const raw = await loader(issuer.domain);
-    const toml = parseXrpLedgerToml(raw);
+    const toml = parseXahauToml(raw);
     const verified = isAccountListed(toml, issuer.account);
     const profile = pickTomlProfile(toml, issuer.account);
     const links = pickTomlLinks(toml);

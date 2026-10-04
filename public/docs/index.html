@@ -508,7 +508,7 @@
             <span class="path">/v1/issuers/{account}</span>
           </header>
           <div class="body">
-            <p class="sub">Profile plus issued tokens, Hook state, and remarks. <code>domain_verified</code> is true only when <code>/.well-known/xrp-ledger.toml</code> lists this r-address under <code>[[ACCOUNTS]]</code>, <code>[[ISSUERS]]</code>, or <code>[[TOKENS]]</code>.</p>
+            <p class="sub">Profile plus issued tokens, Hook state, and remarks. <code>domain_verified</code> is true only when <code>/.well-known/xahau.toml</code> lists this r-address under <code>[[ACCOUNTS]]</code> or <code>[[CURRENCIES]]</code>.</p>
           </div>
         </article>
       </section>
@@ -639,8 +639,8 @@
           <table>
             <tbody>
               <tr><td><code>domain</code></td><td>Printable AccountRoot Domain</td></tr>
-              <tr><td><code>toml_name</code> / <code>toml_icon_url</code></td><td>From xrp-ledger.toml when listed</td></tr>
-              <tr><td><code>toml_links[]</code></td><td><code>{ url, type, title }</code> from WEBLINKS / TOKENS.WEBLINKS / ORGANIZATION</td></tr>
+              <tr><td><code>toml_name</code> / <code>toml_icon_url</code></td><td>From xahau.toml when the account is listed</td></tr>
+              <tr><td><code>toml_links[]</code></td><td><code>{ url, type, title }</code> from ORGANIZATION / PRINCIPALS socials and any WEBLINKS in that file</td></tr>
               <tr><td><code>blackholed</code></td><td>Master disabled and no usable RegularKey</td></tr>
             </tbody>
           </table>

@@ -209,8 +209,8 @@ On first sight (snapshot or first trust line):
 
 1. `account_info`
 2. Domain hex → UTF-8
-3. Queue `https://<domain>/.well-known/xrp-ledger.toml` (XRPL TOML filename; Xahau issuers use it)
-4. Verify the r-address appears under `[[ACCOUNTS]]`, `[[ISSUERS]]`, or `[[TOKENS]]`
+3. Queue `https://<domain>/.well-known/xahau.toml` (Xahau identity file only — never `xrp-ledger.toml`)
+4. Verify the r-address appears under `[[ACCOUNTS]]` or `[[CURRENCIES]]`
 5. Store `toml_*` fields + `toml_raw` as JSON
 6. Re-verify about every 1000 ledgers, and on `AccountSet` that changes Domain
 

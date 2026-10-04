@@ -13,7 +13,7 @@ XahauIndex connects to a xahaud node, snapshots the current ledger, follows it i
 - **Current-ledger snapshot** — holder counts, supply, URITokens, and Hooks are correct on first boot
 - **IOU tokens** — trust lines, holders, issuer metadata, supply, remarks
 - **URITokens** — Xahau native NFTs; mint / sell / transfer / burn plus Remarks
-- **Issuer profiles** — domain verification via `xrp-ledger.toml`, blackhole detection, AccountRoot remarks
+- **Issuer profiles** — domain verification via `/.well-known/xahau.toml`, blackhole detection, AccountRoot remarks
 - **Icon URLs** — remarks, TOML, and URI metadata JSON store `https` / `ipfs` links only. No image cache or CDN.
 - **URIToken metadata** — if the on-ledger URI is HTTPS JSON, that document is stored on the token (`metadata`) besides the icon link.
 - **DEX prices** — OHLCV (`1h` / `24h` / `7d`) and a trade tape, filterable by time or ledger range
