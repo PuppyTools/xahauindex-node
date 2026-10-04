@@ -31,7 +31,11 @@ tags:
   - name: prices
     description: DEX-derived historical OHLCV and trade tape
   - name: hooks
-    description: Hook activity per account
+    description: |
+      Hook activity per account. Install slots come from the `Hook` ledger object.
+      Shared WASM metadata is a `HookDefinition` (`code_size` only — bytecode is not stored).
+      `label` is a static catalog: current Evernode hashes, or the four stable Evernode
+      system accounts if governance rotated the WASM. Unknown hooks return `label: null`.
   - name: status
     description: Indexer health, snapshot, and sync status
 
@@ -502,6 +506,27 @@ components:
         tx_hash:
           type: string
 
+    HookLabel:
+      type: object
+      required: [name, project, description, url, source]
+      description: |
+        Read-time catalog name. Hash match wins; if the hash is unknown the install
+        account is checked (Evernode system accounts stay labeled after a hash rotation).
+      properties:
+        name:
+          type: string
+          example: Evernode heartbeat
+        project:
+          type: string
+          example: Evernode
+        description:
+          type: string
+        url:
+          type: string
+        source:
+          type: string
+          enum: [catalog]
+
     HookTriggerMask:
       type: object
       required: [raw, mode, types]
@@ -522,6 +547,10 @@ components:
       properties:
         hook_hash:
           type: string
+        label:
+          nullable: true
+          allOf:
+            - $ref: '#/components/schemas/HookLabel'
         hook_namespace:
           type: string
           nullable: true
@@ -606,6 +635,10 @@ components:
             properties:
               hook_hash:
                 type: string
+              label:
+                nullable: true
+                allOf:
+                  - $ref: '#/components/schemas/HookLabel'
               hook_on:
                 type: string
                 nullable: true
@@ -1089,6 +1122,7 @@ paths:
       operationId: listHookDefinitions
       tags: [hooks]
       summary: List indexed HookDefinition objects
+      description: Shared WASM metadata. `label` is attached when the hash is in the catalog.
       parameters:
         - $ref: '#/components/parameters/page'
         - $ref: '#/components/parameters/per_page'
@@ -1142,6 +1176,9 @@ paths:
       operationId: getHooks
       tags: [hooks]
       summary: Hook state for a Xahau account
+      description: |
+        404 if that account has no indexed Hook object. Known Evernode accounts still
+        receive a `label` after a hash rotation.
       parameters:
         - name: account
           in: path

@@ -197,7 +197,7 @@ v1 snapshot + live persist remarks for `URIToken`, `AccountRoot`, `RippleState`.
 
 ### Hooks (`hooks.ts`)
 
-Watch `SetHook` metadata (`LedgerEntryType: Hook` and `HookDefinition`) and snapshot those objects. Do not read a hook array off `AccountRoot`. Store definition defaults and `code_size`, never `CreateCode`.
+Watch `SetHook` metadata (`LedgerEntryType: Hook` and `HookDefinition`) and snapshot those objects. Do not read a hook array off `AccountRoot`. Store definition defaults and `code_size`, never `CreateCode`. Attach `label` at read time from `src/util/hookLabels.ts` (hash first, then Evernode system account).
 
 Persist the full hook array as JSON **and** keep these fields per entry when present:
 

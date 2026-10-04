@@ -119,7 +119,7 @@ Well-known keys (`name`, `description`, `image`, `icon`, `website`, `attributes`
 
 ### Hooks
 
-Installed hooks are a `Hook` ledger object ([Xahau Hook](https://xahau.network/docs/protocol-reference/ledger-data/ledger-objects-types/hook/)): `Account` plus a `Hooks` array of `{ Hook: { HookHash, … } }` slots. The bytecode and defaults live on a reference-counted `HookDefinition` ([docs](https://xahau.network/docs/protocol-reference/ledger-data/ledger-objects-types/hook-definition/)). Snapshot indexes both from `ledger_data`. Live `SetHook` creates / replaces / deletes them. Store `code_size`, not `CreateCode`. `AccountRoot` does not carry the hook array. HookOn bitmasks are decoded to `triggers` (`all_except` / `only` / `none`) at read time. Empty slots are dropped.
+Installed hooks are a `Hook` ledger object ([Xahau Hook](https://xahau.network/docs/protocol-reference/ledger-data/ledger-objects-types/hook/)): `Account` plus a `Hooks` array of `{ Hook: { HookHash, … } }` slots. The bytecode and defaults live on a reference-counted `HookDefinition` ([docs](https://xahau.network/docs/protocol-reference/ledger-data/ledger-objects-types/hook-definition/)). Snapshot indexes both from `ledger_data`. Live `SetHook` creates / replaces / deletes them. Store `code_size`, not `CreateCode`. `AccountRoot` does not carry the hook array. HookOn bitmasks are decoded to `triggers` (`all_except` / `only` / `none`) at read time. Empty slots are dropped. `label` is applied at read time from `src/util/hookLabels.ts`: hash first, then the four stable Evernode accounts if governance rotated the WASM. Do not invent hashes — update the catalog from a live `account_objects type=hook` read.
 
 ### Issuers + TOML
 

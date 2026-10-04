@@ -32,15 +32,18 @@ describe('API docs', () => {
     assert.match(docs.body, /source: "onchain"/);
     assert.match(docs.body, /RATE_LIMITED/);
     assert.match(docs.body, /\/v1\/hooks\/definitions/);
-
-    const root = await app.inject({ method: 'GET', url: '/' });
-    assert.equal(root.statusCode, 200);
-    assert.match(root.body, /XahauIndex/);
+    assert.match(docs.body, /Evernode heartbeat/);
+    assert.match(docs.body, /Recipes/);
 
     const spec = await app.inject({ method: 'GET', url: '/v1/openapi.yaml' });
     assert.equal(spec.statusCode, 200);
     assert.match(spec.body, /openapi: 3.1.0/);
     assert.match(spec.body, /title: XahauIndex API/);
+    assert.match(spec.body, /HookLabel/);
+
+    const root = await app.inject({ method: 'GET', url: '/' });
+    assert.equal(root.statusCode, 200);
+    assert.match(root.body, /XahauIndex/);
 
     await app.close();
   });

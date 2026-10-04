@@ -303,6 +303,7 @@
         <div class="group">Start</div>
         <a href="#overview">Overview</a>
         <a href="#conventions">Conventions</a>
+        <a href="#recipes">Recipes</a>
         <a href="#errors">Errors</a>
         <div class="group">REST</div>
         <a href="#status">Status</a>
@@ -354,6 +355,25 @@
         </div>
       </section>
 
+      <section id="recipes">
+        <h3>Recipes</h3>
+        <p class="sub">Same node, three consumers. All of these are live on this instance after snapshot completes (<code>/v1/status</code> → <code>live</code>).</p>
+        <div class="grid">
+          <article class="card">
+            <h4>Wallet</h4>
+            <p>Token list: <code>GET /v1/tokens?q=</code> or filter <code>domain_verified=true</code>. Show <code>icon_url</code>, <code>toml_links</code>, <code>blackholed</code>. URITokens the user owns: <code>GET /v1/uritokens?owner={account}</code>. Issuer badge: <code>GET /v1/issuers/{account}</code> — <code>domain_verified</code> is Xahau <code>xahau.toml</code> only.</p>
+          </article>
+          <article class="card">
+            <h4>Explorer</h4>
+            <p>Health: <code>GET /v1/status</code> (<code>ledger_index</code> vs network tip). Holders: <code>/v1/tokens/{currency}/{issuer}/holders</code>. NFT: <code>/v1/uritokens/{id}</code> (<code>metadata</code>, remarks, transfers). Hooks: <code>/v1/hooks/{account}</code> — <code>label</code> for known hashes, <code>triggers</code> for HookOn, <code>definition.code_size</code> without downloading WASM.</p>
+          </article>
+          <article class="card">
+            <h4>DEX UI</h4>
+            <p>Candles: <code>GET /v1/prices/{base}/{counter}?period=1h&amp;from=&amp;to=</code>. Tape: <code>/v1/trades/{base}/{counter}</code>. Native XAH has a null issuer — omit the issuer query. Live: subscribe to <code>prices</code>.</p>
+          </article>
+        </div>
+      </section>
+
       <section id="errors">
         <h3>Errors</h3>
         <p class="sub">Failures are not wrapped in the data envelope.</p>
@@ -385,9 +405,11 @@
             <table>
               <thead><tr><th>Field</th><th>Meaning</th></tr></thead>
               <tbody>
-                <tr><td><code>snapshot_status</code></td><td><code>pending</code> · <code>running</code> · <code>complete</code></td></tr>
+                <tr><td><code>status</code></td><td><code>syncing</code> while the snapshot is unfinished · <code>live</code> when current · <code>degraded</code> if lag grows</td></tr>
+                <tr><td><code>snapshot_status</code></td><td><code>pending</code> · <code>running</code> · <code>complete</code>. Token, URIToken, issuer, and Hook lists stay empty until complete</td></tr>
+                <tr><td><code>snapshot_ledger</code></td><td>Ledger the snapshot walked. Restarting a complete node does not re-walk those objects</td></tr>
                 <tr><td><code>history_start_ledger</code></td><td>Earliest ledger with collected history (backfill frontier while walking down, else live-from)</td></tr>
-                <tr><td><code>backfill_status</code> / <code>backfill_from</code> / <code>backfill_ledger</code></td><td>Optional historical walk</td></tr>
+                <tr><td><code>backfill_status</code> / <code>backfill_from</code> / <code>backfill_ledger</code></td><td>Optional historical walk (DEX trades + URIToken transfers only)</td></tr>
                 <tr><td><code>lag_ledgers</code></td><td>Network tip minus last applied ledger</td></tr>
               </tbody>
             </table>
@@ -551,7 +573,26 @@
 
       <section id="hooks">
         <h3>Hooks</h3>
-        <p class="sub">Accounts that currently own a <code>Hook</code> ledger object. Each slot includes the install fields plus the shared <code>HookDefinition</code> (code size, default HookOn, namespace, parameters, fees). HookOn bitmasks become <code>triggers</code>. WASM is not stored. Empty slots are dropped.</p>
+        <p class="sub">Accounts that currently own a <code>Hook</code> ledger object. Each slot includes the install fields plus the shared <code>HookDefinition</code>. HookOn bitmasks become <code>triggers</code>. Known hashes get a <code>label</code>; if the hash rotated, the four Evernode system accounts still match. WASM is not stored. Empty slots are dropped. A finished snapshot is required — restarting a complete node does not re-walk Hook objects.</p>
+        <pre>{
+  "hook_hash": "1F7C84E1…D13439EC",
+  "label": {
+    "name": "Evernode heartbeat",
+    "project": "Evernode",
+    "source": "catalog"
+  },
+  "triggers": { "mode": "all_except", "types": ["SetHook"] },
+  "definition": { "code_size": 500, "reference_count": 12, "hook_fee": "74" }
+}</pre>
+        <table>
+          <thead><tr><th>Catalog</th><th>Account</th></tr></thead>
+          <tbody>
+            <tr><td>Evernode governor</td><td><code>rBvKgF3jSZWdJcwSsmoJspoXLLDVLDp6jg</code></td></tr>
+            <tr><td>Evernode registry</td><td><code>rmv53yu8Wid6kj6AC6NvmiwSXNxRa8vTH</code></td></tr>
+            <tr><td>Evernode heartbeat</td><td><code>rHktfGUbjqzU4GsYCMc1pDjdHXb5CJamto</code></td></tr>
+            <tr><td>Evernode reputation</td><td><code>rsfTBRAbD2bYjVuXhJ2RReQXxR4K5birVW</code></td></tr>
+          </tbody>
+        </table>
         <article class="endpoint">
           <header>
             <span class="verb">GET</span>
@@ -663,6 +704,18 @@
               <tr><td><code>toml_name</code> / <code>toml_icon_url</code></td><td>From xahau.toml when the account is listed</td></tr>
               <tr><td><code>toml_links[]</code></td><td><code>{ url, type, title }</code> from ORGANIZATION / PRINCIPALS socials and any WEBLINKS in that file</td></tr>
               <tr><td><code>blackholed</code></td><td>Master disabled and no usable RegularKey</td></tr>
+            </tbody>
+          </table>
+        </article>
+        <article class="card" style="margin-bottom:14px">
+          <h4>Hook</h4>
+          <table>
+            <tbody>
+              <tr><td><code>hook_hash</code></td><td>SHA-512Half of the WASM — the HookDefinition id</td></tr>
+              <tr><td><code>label</code></td><td>Static catalog name when the hash or Evernode system account is known</td></tr>
+              <tr><td><code>triggers</code></td><td>Decoded HookOn: <code>all_except</code>, <code>only</code>, or <code>none</code></td></tr>
+              <tr><td><code>definition</code></td><td>Shared defaults, <code>code_size</code>, fees. No bytecode</td></tr>
+              <tr><td><code>hook_name</code></td><td>NamedHooks trigger (4–16 bytes), not a product title</td></tr>
             </tbody>
           </table>
         </article>

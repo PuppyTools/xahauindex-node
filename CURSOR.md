@@ -69,6 +69,7 @@ src/
     xahau.ts        — currency normalisation, account validation, hex helpers, blackhole
     domain.ts       — /.well-known/xahau.toml fetcher/parser
     hookOn.ts       — HookOn / HookCanEmit bitmask → transaction type names
+    hookLabels.ts   — static Evernode (and later) hook-hash / account labels
     uriPayload.ts   — classify URI + decode on-chain URI blobs (Evernode evrlease)
     retry.ts        — exponential backoff
 public/docs/        — branded API docs page
@@ -92,7 +93,7 @@ Xahau's native NFT format. **Not** XLS-20 NFTs. Key fields:
 - `Destination` — optional buyer restriction on the sell offer
 
 ### Hooks
-Xahau stores installed hooks on a dedicated `LedgerEntryType: Hook` object (`Account` + `Hooks` array), not on `AccountRoot`. The WASM and defaults live on an unowned `HookDefinition` keyed by `HookHash`. Persist the install slot (`HookHash`, parameters, grants, namespace, HookOn v1/v2, `HookCanEmit`) and the definition (`code_size`, default HookOn, namespace, parameters, fees, reference count). Do **not** store `CreateCode`. Decode HookOn bitmasks at read time ([active-low except bit 22](https://xahau.network/docs/hooks/concepts/hookon-field/)). Empty `{ Hook: {} }` slots are ignored.
+Xahau stores installed hooks on a dedicated `LedgerEntryType: Hook` object (`Account` + `Hooks` array), not on `AccountRoot`. The WASM and defaults live on an unowned `HookDefinition` keyed by `HookHash`. Persist the install slot (`HookHash`, parameters, grants, namespace, HookOn v1/v2, `HookCanEmit`) and the definition (`code_size`, default HookOn, namespace, parameters, fees, reference count). Do **not** store `CreateCode`. Decode HookOn bitmasks at read time ([active-low except bit 22](https://xahau.network/docs/hooks/concepts/hookon-field/)). Empty `{ Hook: {} }` slots are ignored. `label` is a static catalog (`src/util/hookLabels.ts`): match current Evernode hashes, or the stable Evernode system account if the hash has rotated.
 
 ### Remarks
 On-ledger key/value metadata via the Remarks amendment / `SetRemarks`. Each entry is hex `RemarkName` + optional `RemarkValue` (omit value to delete). Max 32 per object. `Flags & 1` = immutable.

@@ -18,7 +18,7 @@ XahauIndex connects to a xahaud node, snapshots the current ledger, follows it i
 - **URIToken metadata** — HTTPS JSON URIs are fetched and stored. Packed on-chain URIs (Evernode `evrlease`, text, bytes) are decoded into `metadata` at read time so the token is still viewable.
 - **DEX prices** — OHLCV (`1h` / `24h` / `7d`) and a trade tape, filterable by time or ledger range
 - **Optional history backfill** — walk closed ledgers back from the snapshot (genesis or a lookback) for trades and URIToken transfers without rewriting current balances
-- **Hook activity** — which accounts have Hooks installed and which hashes
+- **Hook activity** — which accounts have Hooks installed, HookDefinition metadata, decoded HookOn triggers, and catalog labels for known hashes (Evernode governor / registry / heartbeat / reputation)
 - **Real-time WebSocket** — token, URIToken, price, and hook streams
 - **Docker-first** — `docker compose up`
 
@@ -119,13 +119,21 @@ Token and pair identifiers use **separate path segments** (no `:` or `+` in one 
 | GET | `/v1/prices/{base}/{counter}` | OHLCV candles (`from` / `to` / ledger range) |
 | GET | `/v1/trades/{base}/{counter}` | Executed DEX trades |
 | GET | `/v1/hooks` | Accounts with Hooks |
-| GET | `/v1/hooks/{account}` | Hook state |
+| GET | `/v1/hooks/{account}` | Hook state (`label` + `triggers` + `definition`) |
 | GET | `/v1/hooks/definitions` | HookDefinition catalog |
 | GET | `/v1/hooks/definitions/{hook_hash}` | One HookDefinition |
 
 ```
 WS /v1/subscribe
 { "command": "subscribe", "streams": ["tokens", "uritokens", "prices", "hooks"] }
+```
+
+```bash
+# wait until snapshot_status is complete / status is live
+curl -s http://localhost:3000/v1/status
+# Evernode heartbeat (stable account; hash can rotate)
+curl -s http://localhost:3000/v1/hooks/rHktfGUbjqzU4GsYCMc1pDjdHXb5CJamto
+curl -s http://localhost:3000/v1/hooks/definitions?per_page=5
 ```
 
 Full contract: [`docs/openapi.yaml`](docs/openapi.yaml).
@@ -149,7 +157,9 @@ See [`docs/architecture.md`](docs/architecture.md) and [`docs/implementation-pla
 
 **URITokens** are Xahau's native NFT format (not XLS-20). Each has a `URITokenID`, a hex `URI`, and optional Remarks.
 
-**Hooks** are smart contracts attached to accounts. On Xahau they live on a `Hook` ledger object (`Account` + `Hooks` array), not on `AccountRoot`. The WASM and defaults live on a shared `HookDefinition`. XahauIndex stores the install array plus definition metadata (`code_size`, default HookOn, namespace, parameters, fees) and decodes HookOn into `triggers`. Bytecode is not stored.
+**Hooks** are smart contracts attached to accounts. On Xahau they live on a `Hook` ledger object (`Account` + `Hooks` array), not on `AccountRoot`. The WASM and defaults live on a shared `HookDefinition`. XahauIndex stores the install array plus definition metadata (`code_size`, default HookOn, namespace, parameters, fees) and decodes HookOn into `triggers`. Bytecode is not stored. Known hashes (and the four Evernode system accounts) get a `label` at read time — hashes rotate when governance elects new WASM, so the account fallback still names those slots.
+
+A finished snapshot is required for `/v1/hooks`. Restarting a node that already marked the snapshot complete does not re-walk Hook objects. After upgrading to Hook-object ingest, wipe the SQLite file (or clear `snapshot_status`) and resnapshot.
 
 **Remarks** are on-ledger `{ name, value }` pairs (hex). v1 indexes them on URITokens, issuer accounts, and issuer-side trust lines.
 

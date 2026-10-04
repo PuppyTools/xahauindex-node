@@ -161,6 +161,14 @@ export interface HookTriggerMask {
   types: string[];
 }
 
+export interface HookLabel {
+  name: string;
+  project: string;
+  description: string;
+  url: string;
+  source: 'catalog';
+}
+
 export interface HookDefinition {
   hook_hash: string;
   hook_namespace?: string | null;
@@ -183,6 +191,7 @@ export interface HookDefinition {
   can_emit?: HookTriggerMask | null;
   first_ledger?: number;
   last_updated?: number;
+  label?: HookLabel | null;
 }
 
 export interface HookEntry {
@@ -201,6 +210,7 @@ export interface HookEntry {
   triggers_outgoing?: HookTriggerMask | null;
   can_emit?: HookTriggerMask | null;
   definition?: HookDefinition | null;
+  label?: HookLabel | null;
 }
 
 export interface HookState {

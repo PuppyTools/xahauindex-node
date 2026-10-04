@@ -172,11 +172,82 @@ describe('SetHook and blackhole', () => {
     });
     const account = await app.inject({ method: 'GET', url: `/v1/hooks/${ISSUER}` });
     const definition = await app.inject({ method: 'GET', url: `/v1/hooks/definitions/${FIRST_HOOK}` });
+    assert.equal(account.json().data.hooks[0].label, null);
     assert.equal(account.json().data.hooks[0].definition.code_size, 8);
     assert.equal(account.json().data.hooks[0].triggers.mode, 'only');
     assert.deepEqual(account.json().data.hooks[0].triggers.types, ['Payment']);
     assert.equal(definition.json().data.hook_hash, FIRST_HOOK);
     assert.equal(definition.json().data.hook_fee, '74');
+    await app.close();
+  });
+
+  it('attaches an Evernode catalog label by hook hash', async () => {
+    const heartbeat = '1F7C84E14313C4FF2D4F39535428BF10767CCF8E87EFB51306CC3F94D13439EC';
+    const db = memoryDb();
+    applyClosedLedger(
+      db,
+      {
+        index: 51,
+        hash: '7'.repeat(64),
+        closeTime: 1_700_000_051,
+        transactions: [hookTx(51, '17'.repeat(32), [{ Hook: { HookHash: heartbeat } }])],
+      },
+      silentLog,
+    );
+    const app = await buildApi({
+      db,
+      config: testConfig(),
+      runtime: testRuntime({ networkLedgerIndex: 51 }),
+    });
+    const account = await app.inject({ method: 'GET', url: `/v1/hooks/${ISSUER}` });
+    assert.equal(account.json().data.hooks[0].label.name, 'Evernode heartbeat');
+    assert.equal(account.json().data.hooks[0].label.project, 'Evernode');
+    await app.close();
+  });
+
+  it('labels an Evernode system account after the hash rotates', async () => {
+    const governor = 'rBvKgF3jSZWdJcwSsmoJspoXLLDVLDp6jg';
+    const rotated = 'A'.repeat(64);
+    const db = memoryDb();
+    applyClosedLedger(
+      db,
+      {
+        index: 51,
+        hash: '8'.repeat(64),
+        closeTime: 1_700_000_051,
+        transactions: [
+          {
+            hash: '18'.repeat(32),
+            TransactionType: 'SetHook',
+            Account: governor,
+            meta: {
+              TransactionResult: 'tesSUCCESS',
+              AffectedNodes: [
+                {
+                  ModifiedNode: {
+                    LedgerEntryType: 'Hook',
+                    LedgerIndex: 'd'.repeat(64),
+                    FinalFields: {
+                      Account: governor,
+                      Flags: 0,
+                      Hooks: [{ Hook: { HookHash: rotated } }],
+                    },
+                  },
+                },
+              ],
+            },
+          },
+        ],
+      },
+      silentLog,
+    );
+    const app = await buildApi({
+      db,
+      config: testConfig(),
+      runtime: testRuntime({ networkLedgerIndex: 51 }),
+    });
+    const account = await app.inject({ method: 'GET', url: `/v1/hooks/${governor}` });
+    assert.equal(account.json().data.hooks[0].label.name, 'Evernode governor');
     await app.close();
   });
 

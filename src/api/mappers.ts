@@ -13,6 +13,7 @@ import type {
 import type { SqliteDatabase } from '../db/client.js';
 import { listHookDefinitionsByHashes } from '../db/queries/hooks.js';
 import { parseStoredTomlLinks } from '../util/domain.js';
+import { labelForHook } from '../util/hookLabels.js';
 import { decodeHookOn } from '../util/hookOn.js';
 import { metadataFromRow } from '../util/icon.js';
 import { classifyUri, resolveUriTokenMetadata } from '../util/uriPayload.js';
@@ -186,10 +187,16 @@ export function hookDefinitionFromRow(row: HookDefinitionRow): HookDefinition {
     can_emit: decodeHookOn(row.hook_can_emit),
     first_ledger: row.first_ledger,
     last_updated: row.last_updated,
+    label: labelForHook({ hookHash: row.hook_hash }),
   };
 }
 
-function enrichHookEntry(entry: HookEntry, definition: HookDefinition | undefined): HookEntry {
+function enrichHookEntry(
+  entry: HookEntry,
+  definitionRow: HookDefinitionRow | undefined,
+  account: string,
+): HookEntry {
+  const definition = definitionRow === undefined ? undefined : hookDefinitionFromRow(definitionRow);
   const hookOn = entry.hook_on ?? definition?.hook_on ?? null;
   const incoming = entry.hook_on_incoming ?? definition?.hook_on_incoming ?? null;
   const outgoing = entry.hook_on_outgoing ?? definition?.hook_on_outgoing ?? null;
@@ -201,6 +208,7 @@ function enrichHookEntry(entry: HookEntry, definition: HookDefinition | undefine
     triggers_outgoing: decodeHookOn(outgoing),
     can_emit: decodeHookOn(canEmit),
     definition: definition ?? null,
+    label: labelForHook({ hookHash: entry.hook_hash, account }),
   };
 }
 
@@ -221,6 +229,7 @@ export function hookStateFromRow(
       enrichHookEntry(
         entry,
         definitions?.get(entry.hook_hash.toUpperCase()) ?? definitions?.get(entry.hook_hash),
+        row.account,
       ),
     ),
     first_ledger: row.first_ledger,
