@@ -76,6 +76,9 @@ curl -s 'http://localhost:3000/v1/hooks/definitions?per_page=5'
 
 ## WebSocket subscribe
 
+Not a xahaud `ledger` / `transactions` subscribe. Those sockets emit raw protocol traffic. This one pushes the same enriched objects as REST (`tokens`, `uritokens`, `prices`, `hooks`) after this node has indexed them.
+
+
 ```bash
 npx wscat -c ws://localhost:3000/v1/subscribe
 # then send:

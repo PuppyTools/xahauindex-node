@@ -40,6 +40,8 @@ describe('API docs', () => {
     assert.match(docs.body, /XahauIndex/);
     assert.match(docs.body, /\/v1\/tokens\/\{currency\}\/\{issuer\}/);
     assert.match(docs.body, /\/v1\/subscribe/);
+    assert.match(docs.body, /Not a stand-in for/);
+    assert.match(docs.body, /raw ledgers, transactions, and books/);
     assert.match(docs.body, /"source": "onchain"/);
     assert.match(docs.body, /RATE_LIMITED/);
     assert.match(docs.body, /\/v1\/hooks\/definitions/);
