@@ -1,4 +1,5 @@
 import type { DexTrade, HookState, Issuer, OHLCVCandle, Token, TrustLine, URIToken } from '../types/api.js';
+import { metadataFromRow } from '../util/icon.js';
 import type {
   DexTradeRow,
   HookAccountRow,
@@ -84,6 +85,7 @@ export function uriTokenFromRow(
     mint_ledger: row.mint_ledger,
     last_updated: row.last_updated,
     icon_url: row.icon_url,
+    metadata: metadataFromRow(row.uri_metadata),
     ...(extras?.remarks === undefined ? {} : { remarks: extras.remarks }),
     ...(extras?.transferCount === undefined ? {} : { transfer_count: extras.transferCount }),
   };

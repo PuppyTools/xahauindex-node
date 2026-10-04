@@ -78,6 +78,7 @@ export interface UriTokenRow {
   mint_ledger: number;
   last_updated: number;
   icon_url: string | null;
+  uri_metadata: string | null;
   uri_meta_checked_ledger: number | null;
 }
 

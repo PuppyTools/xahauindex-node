@@ -36,10 +36,10 @@ export function upsertUriToken(db: SqliteDatabase, row: UriTokenRow): void {
     `
     INSERT INTO uri_tokens (
       id, uri, uri_raw, digest, issuer, owner, flags, sell_offer, destination,
-      burned, burn_ledger, mint_ledger, last_updated, icon_url, uri_meta_checked_ledger
+      burned, burn_ledger, mint_ledger, last_updated, icon_url, uri_metadata, uri_meta_checked_ledger
     ) VALUES (
       @id, @uri, @uri_raw, @digest, @issuer, @owner, @flags, @sell_offer, @destination,
-      @burned, @burn_ledger, @mint_ledger, @last_updated, @icon_url, @uri_meta_checked_ledger
+      @burned, @burn_ledger, @mint_ledger, @last_updated, @icon_url, @uri_metadata, @uri_meta_checked_ledger
     )
     ON CONFLICT(id) DO UPDATE SET
       uri = excluded.uri,
@@ -53,7 +53,14 @@ export function upsertUriToken(db: SqliteDatabase, row: UriTokenRow): void {
       burn_ledger = excluded.burn_ledger,
       last_updated = excluded.last_updated,
       icon_url = COALESCE(excluded.icon_url, uri_tokens.icon_url),
-      uri_meta_checked_ledger = COALESCE(excluded.uri_meta_checked_ledger, uri_tokens.uri_meta_checked_ledger)
+      uri_metadata = CASE
+        WHEN excluded.uri IS uri_tokens.uri THEN COALESCE(excluded.uri_metadata, uri_tokens.uri_metadata)
+        ELSE NULL
+      END,
+      uri_meta_checked_ledger = CASE
+        WHEN excluded.uri IS uri_tokens.uri THEN COALESCE(excluded.uri_meta_checked_ledger, uri_tokens.uri_meta_checked_ledger)
+        ELSE NULL
+      END
     `,
   ).run(row);
 }
@@ -62,6 +69,13 @@ export function updateUriTokenIcon(db: SqliteDatabase, id: string, iconUrl: stri
   db.prepare('UPDATE uri_tokens SET icon_url = @icon_url WHERE id = @id').run({
     id,
     icon_url: iconUrl,
+  });
+}
+
+export function updateUriTokenMetadata(db: SqliteDatabase, id: string, metadata: string): void {
+  db.prepare('UPDATE uri_tokens SET uri_metadata = @uri_metadata WHERE id = @id').run({
+    id,
+    uri_metadata: metadata,
   });
 }
 
@@ -84,7 +98,12 @@ export function listUriTokensDueForMeta(
       SELECT * FROM uri_tokens
       WHERE uri IS NOT NULL
         AND uri != ''
-        AND (icon_url IS NULL OR icon_url = '')
+        AND (
+          uri_metadata IS NULL
+          OR uri_metadata = ''
+          OR icon_url IS NULL
+          OR icon_url = ''
+        )
         AND (uri_meta_checked_ledger IS NULL OR @ledger - uri_meta_checked_ledger >= @interval)
       ORDER BY mint_ledger DESC
       LIMIT @limit

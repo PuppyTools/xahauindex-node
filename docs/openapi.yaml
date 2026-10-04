@@ -305,6 +305,9 @@ components:
           type: string
           nullable: true
           description: On-ledger or URI-metadata image link. The indexer stores the URL only and never caches image bytes.
+        metadata:
+          nullable: true
+          description: JSON document fetched from the URIToken URI when that URI is metadata, not an image
         remarks:
           $ref: '#/components/schemas/Remarks'
         transfer_count:

@@ -162,7 +162,7 @@ In: current-ledger snapshot · live ingest · optional historical backfill (env-
 
 Out: auth/rate limiting · Governance Game · multi-node federation · icon CDN / image byte cache
 
-Icon URLs come from remarks, issuer TOML, or URI metadata JSON. Persist the URL string only — never download, store, or proxy image bytes. `data:` URIs are rejected.
+Icon URLs come from remarks, issuer TOML, or URI metadata JSON. Persist the URL string only — never download, store, or proxy image bytes. `data:` URIs are rejected. When a URIToken URI is HTTPS JSON metadata, store that JSON on the token as well.
 
 History mode must not overwrite snapshot balances, owners, issuers, or Hooks. It records DEX trades and URIToken transfers only.
 

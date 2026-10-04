@@ -42,6 +42,29 @@ export function uriLooksLikeImage(uri: string): boolean {
   return IMAGE_EXT.test(uri.split('?')[0] ?? uri);
 }
 
+export function parseUriMetadataJson(text: string): unknown | null {
+  const trimmed = text.trim();
+  if (trimmed === '' || !(trimmed.startsWith('{') || trimmed.startsWith('['))) {
+    return null;
+  }
+  try {
+    const parsed: unknown = JSON.parse(trimmed);
+    if (parsed === null || typeof parsed !== 'object') {
+      return null;
+    }
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
+export function metadataFromRow(raw: string | null): unknown | null {
+  if (raw === null || raw === '') {
+    return null;
+  }
+  return parseUriMetadataJson(raw);
+}
+
 export function extractIconUrlFromMetadata(value: unknown): string | null {
   if (typeof value === 'string') {
     return normalizeIconUrl(value);

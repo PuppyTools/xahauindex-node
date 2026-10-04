@@ -4,7 +4,7 @@ import { afterEach, describe, it } from 'node:test';
 import { closeDatabase, openDatabase, type SqliteDatabase } from '../../src/db/client.js';
 import { getUriToken, upsertUriToken } from '../../src/db/queries/uritokens.js';
 import { applyClosedLedger } from '../../src/ingester/ledger.js';
-import { refreshUriTokenIcon, runUriMetaPass } from '../../src/ingester/metadata.js';
+import { refreshUriTokenMetadata, runUriMetaPass } from '../../src/ingester/metadata.js';
 import { silentLog } from '../helpers.js';
 
 const ISSUER = 'rHb9CJAWyB4rj91VRWn96DkukG4bwdtyTh';
@@ -41,11 +41,12 @@ function seedUri(db: SqliteDatabase, id: string, uri: string, iconUrl: string | 
     mint_ledger: 10,
     last_updated: 10,
     icon_url: iconUrl,
+    uri_metadata: null,
     uri_meta_checked_ledger: null,
   });
 }
 
-describe('URIToken icon URLs', () => {
+describe('URIToken metadata', () => {
   it('stores a remarks image link and never accepts data URIs', () => {
     const db = memoryDb();
     applyClosedLedger(
@@ -142,29 +143,30 @@ describe('URIToken icon URLs', () => {
     assert.equal(getUriToken(db, URI_ID)?.icon_url, 'https://cdn.example/nft.png');
   });
 
-  it('copies an image URI and JSON metadata image URL without keeping fetched bytes', async () => {
+  it('copies an image URI without fetching, and stores JSON metadata when the URI is a document', async () => {
     const db = memoryDb();
     seedUri(db, URI_ID, 'https://cdn.example/direct.webp');
-    seedUri(db, META_ID, 'https://cdn.example/meta.json');
+    seedUri(db, META_ID, 'https://cdn.example/meta.json', 'https://cdn.example/already.png');
     const fetched: string[] = [];
+    const document = { name: 'NFT', description: 'Cool', image: 'https://cdn.example/from-json.png' };
 
-    assert.equal(
-      await refreshUriTokenIcon({
-        db,
-        id: URI_ID,
-        uri: 'https://cdn.example/direct.webp',
-        iconUrl: null,
-        ledger: 20,
-        log: silentLog,
-        loader: async (url) => {
-          fetched.push(url);
-          return { text: 'SHOULD_NOT_STORE', contentType: 'image/webp' };
-        },
-      }),
-      'https://cdn.example/direct.webp',
-    );
+    const imageOnly = await refreshUriTokenMetadata({
+      db,
+      id: URI_ID,
+      uri: 'https://cdn.example/direct.webp',
+      iconUrl: null,
+      ledger: 20,
+      log: silentLog,
+      loader: async (url) => {
+        fetched.push(url);
+        return { text: 'SHOULD_NOT_STORE', contentType: 'image/webp' };
+      },
+    });
+    assert.equal(imageOnly.icon, 'https://cdn.example/direct.webp');
+    assert.equal(imageOnly.metadata, null);
     assert.deepEqual(fetched, []);
     assert.equal(getUriToken(db, URI_ID)?.icon_url, 'https://cdn.example/direct.webp');
+    assert.equal(getUriToken(db, URI_ID)?.uri_metadata, null);
 
     const stored = await runUriMetaPass({
       db,
@@ -173,13 +175,16 @@ describe('URIToken icon URLs', () => {
       loader: async (url) => {
         fetched.push(url);
         return {
-          text: JSON.stringify({ name: 'NFT', image: 'https://cdn.example/from-json.png' }),
+          text: JSON.stringify(document),
           contentType: 'application/json',
         };
       },
     });
     assert.equal(stored, 1);
     assert.deepEqual(fetched, ['https://cdn.example/meta.json']);
-    assert.equal(getUriToken(db, META_ID)?.icon_url, 'https://cdn.example/from-json.png');
+    const row = getUriToken(db, META_ID);
+    assert.ok(row);
+    assert.equal(row.icon_url, 'https://cdn.example/already.png');
+    assert.deepEqual(JSON.parse(row.uri_metadata ?? ''), document);
   });
 });

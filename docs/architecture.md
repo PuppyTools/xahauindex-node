@@ -124,7 +124,7 @@ HTTPS only, timeout, size cap, no private-IP redirects.
 
 ### Icons
 
-The API returns `icon_url` / `toml_icon_url` strings. Sources: on-ledger remarks (`image` / `icon` / `icon_url`), issuer TOML `icon` (copied onto tokens that have no icon), and optional HTTPS fetch of a URIToken `uri` when it is JSON metadata. If the URI itself looks like an image, that URI is stored. Image bytes are never downloaded for storage or proxied. `data:` URIs are discarded.
+The API returns `icon_url` / `toml_icon_url` strings. Sources: on-ledger remarks (`image` / `icon` / `icon_url`), issuer TOML `icon` (copied onto tokens that have no icon), and optional HTTPS fetch of a URIToken `uri` when it is JSON metadata. If the URI itself looks like an image, that URI is stored. When the URI is a JSON metadata document, the parsed JSON is stored on the URIToken as `metadata`. Image bytes are never downloaded for storage or proxied. `data:` URIs are discarded.
 
 ### DEX
 

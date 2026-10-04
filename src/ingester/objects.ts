@@ -277,6 +277,7 @@ export function applyUriTokenFields(
     mint_ledger: existing?.mint_ledger ?? object.PreviousTxnLgrSeq ?? ledger,
     last_updated: ledger,
     icon_url: existing?.icon_url ?? null,
+    uri_metadata: existing?.uri_metadata ?? null,
     uri_meta_checked_ledger: existing?.uri_meta_checked_ledger ?? null,
   });
   if (fields === undefined || 'Remarks' in fields) {
