@@ -29,7 +29,7 @@ XahauIndex has three layers: an **ingester** (snapshot + live WebSocket), a **SQ
                            │  reads
                            ▼
 ┌─────────────────────────────────────────────────────────────────┐
-│  Fastify API  :API_PORT/docs + /v1/…   WS /v1/subscribe          │
+│  Fastify API  :API_PORT/docs (from openapi.yaml) + /v1/…         │
 └─────────────────────────────────────────────────────────────────┘
 ```
 
@@ -419,6 +419,8 @@ CREATE INDEX ohlcv_pair_period ON ohlcv_candles(
 ```json
 { "error": { "code": "NOT_FOUND", "message": "Token USD/rHb9… not found" } }
 ```
+
+`/docs`, `/docs/cookbook.md`, and the README cookbook section are generated from `docs/openapi.yaml` (`x-docs`, `x-cookbook`, and response `examples`). Run `npm run docs:sync` after editing the spec.
 
 ### Identifiers
 

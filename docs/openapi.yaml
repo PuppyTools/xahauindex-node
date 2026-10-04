@@ -21,7 +21,120 @@ servers:
   - url: http://localhost:3000
     description: Local instance
 
+x-docs:
+  kicker: Xahau network · self-hosted
+  headline: The missing data layer for wallets, explorers, and DEX UIs.
+  lede: >
+    XahauIndex snapshots the current ledger, follows it live, and serves enriched
+    REST + WebSocket APIs for IOUs, URITokens, issuer profiles, DEX candles, and Hooks.
+    No API key. Operators can turn on a per-IP rate limit. Put a reverse proxy in front if you want TLS.
+  chips:
+    - No auth
+    - Envelope `{ data, meta }`
+    - Native asset `XAH`
+    - OpenAPI 3.1
+  conventions:
+    - title: Response envelope
+      body: >
+        Lists and details return `{ data, meta }`. `meta.ledger_index` is the ledger
+        this node had applied when it answered. Paginated lists also include `count`,
+        `page`, and `per_page`.
+    - title: Token URLs
+      body: >
+        `/v1/tokens/{currency}/{issuer}` — e.g. `/v1/tokens/USD/rHb9…`. Currency is a
+        3-character code or 40-character hex. Issuer is an r-address.
+    - title: Pair URLs
+      body: >
+        `/v1/prices/{base}/{counter}` with `base_issuer` / `counter_issuer` when that
+        side is an IOU. Native `XAH` has a null issuer and needs no issuer query.
+    - title: Amounts
+      body: >
+        IOU values stay decimal strings (including scientific notation from the ledger).
+        XAH drops are converted to XAH for DEX quantities. Icon fields are HTTPS/IPFS
+        links only — this node never caches image bytes.
+  recipes:
+    - title: Wallet
+      body: >
+        Token list: `GET /v1/tokens?q=` or filter `domain_verified=true`. Show `icon_url`,
+        `toml_links`, `blackholed`. URITokens the user owns: `GET /v1/uritokens?owner={account}`.
+        Issuer badge: `GET /v1/issuers/{account}` — `domain_verified` is Xahau `xahau.toml` only.
+    - title: Explorer
+      body: >
+        Health: `GET /v1/status` (`ledger_index` vs network tip). Holders:
+        `/v1/tokens/{currency}/{issuer}/holders`. NFT: `/v1/uritokens/{id}` (`metadata`,
+        remarks, transfers). Hooks: `/v1/hooks/{account}` — `label` for known hashes,
+        `triggers` for HookOn, `definition.code_size` without downloading WASM.
+    - title: DEX UI
+      body: >
+        Candles: `GET /v1/prices/{base}/{counter}?period=1h&from=&to=`. Tape:
+        `/v1/trades/{base}/{counter}`. Native XAH has a null issuer — omit the issuer
+        query. Live: subscribe to `prices`.
+  catalog:
+    title: Known Hook labels
+    rows:
+      - name: Evernode governor
+        account: rBvKgF3jSZWdJcwSsmoJspoXLLDVLDp6jg
+      - name: Evernode registry
+        account: rmv53yu8Wid6kj6AC6NvmiwSXNxRa8vTH
+      - name: Evernode heartbeat
+        account: rHktfGUbjqzU4GsYCMc1pDjdHXb5CJamto
+      - name: Evernode reputation
+        account: rsfTBRAbD2bYjVuXhJ2RReQXxR4K5birVW
+  schema_cards:
+    - Token
+    - URIToken
+    - Issuer
+    - HookEntry
+    - HookDefinition
+    - OHLCVCandle
+    - Status
+
+x-cookbook:
+  - title: Wait for the snapshot
+    note: "Token, URIToken, issuer, and Hook lists stay empty until `snapshot_status` is `complete`."
+    curl: |
+      curl -s http://localhost:3000/v1/status
+  - title: List verified tokens
+    curl: |
+      curl -s 'http://localhost:3000/v1/tokens?domain_verified=true&per_page=5'
+  - title: Token detail
+    curl: |
+      curl -s http://localhost:3000/v1/tokens/USD/rHb9CJAWyB4rj91VRWn96DkukG4bwdtyTh
+  - title: Token holders
+    curl: |
+      curl -s 'http://localhost:3000/v1/tokens/USD/rHb9CJAWyB4rj91VRWn96DkukG4bwdtyTh/holders?nonzero=true'
+  - title: URITokens for an owner
+    curl: |
+      curl -s 'http://localhost:3000/v1/uritokens?owner=rHb9CJAWyB4rj91VRWn96DkukG4bwdtyTh&per_page=5'
+  - title: URIToken detail
+    note: "`id` is the 64-character hex URITokenID. Packed on-chain URIs return `metadata.source: \"onchain\"`."
+    curl: |
+      curl -s http://localhost:3000/v1/uritokens/CCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC
+  - title: Issuer profile
+    curl: |
+      curl -s http://localhost:3000/v1/issuers/rHb9CJAWyB4rj91VRWn96DkukG4bwdtyTh
+  - title: OHLCV candles
+    curl: |
+      curl -s 'http://localhost:3000/v1/prices/USD/XAH?base_issuer=rHb9CJAWyB4rj91VRWn96DkukG4bwdtyTh&period=1h&limit=24'
+  - title: DEX trade tape
+    curl: |
+      curl -s 'http://localhost:3000/v1/trades/USD/XAH?base_issuer=rHb9CJAWyB4rj91VRWn96DkukG4bwdtyTh&per_page=5'
+  - title: Evernode heartbeat hooks
+    note: "The account is stable; the hash can rotate. `label` still names the slot."
+    curl: |
+      curl -s http://localhost:3000/v1/hooks/rHktfGUbjqzU4GsYCMc1pDjdHXb5CJamto
+  - title: Hook definitions
+    curl: |
+      curl -s 'http://localhost:3000/v1/hooks/definitions?per_page=5'
+  - title: WebSocket subscribe
+    curl: |
+      npx wscat -c ws://localhost:3000/v1/subscribe
+      # then send:
+      # {"command":"subscribe","streams":["tokens","uritokens","prices","hooks"]}
+
 tags:
+  - name: status
+    description: Indexer health, snapshot, and sync status. Use this to know whether balances are still catching the snapshot.
   - name: tokens
     description: IOU token metadata, remarks, and trust-line statistics
   - name: uritokens
@@ -36,8 +149,8 @@ tags:
       Shared WASM metadata is a `HookDefinition` (`code_size` only — bytecode is not stored).
       `label` is a static catalog: current Evernode hashes, or the four stable Evernode
       system accounts if governance rotated the WASM. Unknown hooks return `label: null`.
-  - name: status
-    description: Indexer health, snapshot, and sync status
+  - name: subscribe
+    description: Real-time streams on the same port. No separate WebSocket host.
 
 components:
   parameters:
@@ -170,7 +283,7 @@ components:
             code:
               type: string
               example: NOT_FOUND
-              description: `NOT_FOUND`, `BAD_REQUEST`, `RATE_LIMITED`, or `INTERNAL`
+              description: "`NOT_FOUND`, `BAD_REQUEST`, `RATE_LIMITED`, or `INTERNAL`"
             message:
               type: string
 
@@ -200,10 +313,11 @@ components:
       properties:
         id:
           type: string
-          description: Internal id `currency:issuer`
+          description: Internal `currency:issuer`
           example: "USD:rHb9CJAWyB4rj91VRWn96DkukG4bwdtyTh"
         currency:
           type: string
+          description: Display code
           example: "USD"
         currency_hex:
           type: string
@@ -230,14 +344,19 @@ components:
         supply:
           type: string
           nullable: true
+          description: Sum of non-issuer holder balances, decimal string
         holder_count:
           type: integer
+          description: Non-zero holders
         trust_count:
           type: integer
+          description: All trust lines
         domain_verified:
           type: boolean
+          description: Copied from the issuer (`xahau.toml` only)
         blackholed:
           type: boolean
+          description: Copied from the issuer
         first_ledger:
           type: integer
         last_updated:
@@ -283,12 +402,14 @@ components:
       properties:
         id:
           type: string
-          description: URITokenID (64-char hex)
+          description: URITokenID
         uri:
           type: string
           nullable: true
+          description: Decoded URI
         uri_raw:
           type: string
+          description: Original hex URI blob
         uri_kind:
           type: string
           enum: [https, ipfs, image, onchain, empty]
@@ -380,8 +501,10 @@ components:
         domain:
           type: string
           nullable: true
+          description: Printable AccountRoot Domain
         domain_verified:
           type: boolean
+          description: True only when `/.well-known/xahau.toml` lists this r-address
         email_hash:
           type: string
           nullable: true
@@ -456,6 +579,7 @@ components:
       properties:
         open_time:
           type: integer
+          description: UTC period start, unix seconds
         open_ledger:
           type: integer
           nullable: true
@@ -472,6 +596,7 @@ components:
           type: number
         volume:
           type: string
+          description: Base-side decimal string
         trade_count:
           type: integer
 
@@ -619,6 +744,69 @@ components:
         last_updated:
           type: integer
 
+    HookEntry:
+      type: object
+      required: [hook_hash]
+      properties:
+        hook_hash:
+          type: string
+          description: SHA-512Half of the WASM — the HookDefinition id
+        label:
+          nullable: true
+          description: Static catalog name when the hash or Evernode system account is known
+          allOf:
+            - $ref: '#/components/schemas/HookLabel'
+        hook_on:
+          type: string
+          nullable: true
+        hook_on_incoming:
+          type: string
+          nullable: true
+        hook_on_outgoing:
+          type: string
+          nullable: true
+        hook_can_emit:
+          type: string
+          nullable: true
+        hook_namespace:
+          type: string
+          nullable: true
+        hook_name:
+          type: string
+          nullable: true
+          description: NamedHooks trigger (4–16 bytes), not a product title
+        hook_api_version:
+          type: integer
+          nullable: true
+        parameters:
+          type: array
+          items:
+            type: object
+            properties:
+              name:
+                type: string
+              value:
+                type: string
+        grants:
+          type: array
+          items:
+            type: object
+            properties:
+              account:
+                type: string
+              hook_hash:
+                type: string
+        triggers:
+          nullable: true
+          description: Decoded HookOn (`all_except`, `only`, or `none`)
+          allOf:
+            - $ref: '#/components/schemas/HookTriggerMask'
+        definition:
+          nullable: true
+          description: Shared defaults, `code_size`, fees. No bytecode
+          allOf:
+            - $ref: '#/components/schemas/HookDefinition'
+
     HookState:
       type: object
       required: [account, hook_count, hooks]
@@ -630,62 +818,7 @@ components:
         hooks:
           type: array
           items:
-            type: object
-            required: [hook_hash]
-            properties:
-              hook_hash:
-                type: string
-              label:
-                nullable: true
-                allOf:
-                  - $ref: '#/components/schemas/HookLabel'
-              hook_on:
-                type: string
-                nullable: true
-              hook_on_incoming:
-                type: string
-                nullable: true
-              hook_on_outgoing:
-                type: string
-                nullable: true
-              hook_can_emit:
-                type: string
-                nullable: true
-              hook_namespace:
-                type: string
-                nullable: true
-              hook_name:
-                type: string
-                nullable: true
-              hook_api_version:
-                type: integer
-                nullable: true
-              parameters:
-                type: array
-                items:
-                  type: object
-                  properties:
-                    name:
-                      type: string
-                    value:
-                      type: string
-              grants:
-                type: array
-                items:
-                  type: object
-                  properties:
-                    account:
-                      type: string
-                    hook_hash:
-                      type: string
-              triggers:
-                nullable: true
-                allOf:
-                  - $ref: '#/components/schemas/HookTriggerMask'
-              definition:
-                nullable: true
-                allOf:
-                  - $ref: '#/components/schemas/HookDefinition'
+            $ref: '#/components/schemas/HookEntry'
         first_ledger:
           type: integer
         last_updated:
@@ -698,12 +831,15 @@ components:
         status:
           type: string
           enum: [syncing, live, degraded]
+          description: "`syncing` while the snapshot is unfinished · `live` when current · `degraded` if lag grows"
         snapshot_status:
           type: string
           enum: [pending, running, complete]
+          description: Token, URIToken, issuer, and Hook lists stay empty until `complete`
         snapshot_ledger:
           type: integer
           nullable: true
+          description: Ledger the snapshot walked. Restarting a complete node does not re-walk those objects
         history_start_ledger:
           type: integer
           nullable: true
@@ -711,6 +847,7 @@ components:
         backfill_status:
           type: string
           enum: [idle, running, complete]
+          description: Optional historical walk (DEX trades + URIToken transfers only)
         backfill_from:
           type: integer
           nullable: true
@@ -727,6 +864,7 @@ components:
         lag_ledgers:
           type: integer
           nullable: true
+          description: Network tip minus last applied ledger
         indexed_ledgers:
           type: integer
         token_count:
@@ -737,6 +875,413 @@ components:
           type: integer
         uptime_seconds:
           type: integer
+
+  examples:
+    NotFound:
+      value:
+        error:
+          code: NOT_FOUND
+          message: Token USD/rHb9CJAWyB4rj91VRWn96DkukG4bwdtyTh not found
+    BadRequest:
+      value:
+        error:
+          code: BAD_REQUEST
+          message: base_issuer is required when base is not XAH
+    RateLimited:
+      value:
+        error:
+          code: RATE_LIMITED
+          message: Too many requests
+    StatusLive:
+      value:
+        data:
+          status: live
+          snapshot_status: complete
+          snapshot_ledger: 26272600
+          history_start_ledger: 26272601
+          backfill_status: idle
+          backfill_from: null
+          backfill_ledger: null
+          ledger_index: 26272654
+          network_ledger_index: 26272654
+          lag_ledgers: 0
+          indexed_ledgers: 55
+          token_count: 128
+          uri_token_count: 4096
+          issuer_count: 64
+          uptime_seconds: 3600
+        meta:
+          ledger_index: 26272654
+    TokenList:
+      value:
+        data:
+          - id: USD:rHb9CJAWyB4rj91VRWn96DkukG4bwdtyTh
+            currency: USD
+            currency_hex: null
+            issuer: rHb9CJAWyB4rj91VRWn96DkukG4bwdtyTh
+            name: USD
+            description: Example USD IOU
+            icon_url: https://example.com/usd.png
+            website_url: https://example.com
+            toml_links:
+              - url: https://example.com
+                type: website
+                title: Example
+            supply: "1000"
+            holder_count: 12
+            trust_count: 20
+            domain_verified: true
+            blackholed: false
+            first_ledger: 100
+            last_updated: 26272654
+        meta:
+          count: 1
+          page: 1
+          per_page: 5
+          ledger_index: 26272654
+    TokenDetail:
+      value:
+        data:
+          id: USD:rHb9CJAWyB4rj91VRWn96DkukG4bwdtyTh
+          currency: USD
+          currency_hex: null
+          issuer: rHb9CJAWyB4rj91VRWn96DkukG4bwdtyTh
+          name: USD
+          description: Example USD IOU
+          icon_url: https://example.com/usd.png
+          website_url: https://example.com
+          toml_links:
+            - url: https://example.com
+              type: website
+              title: Example
+          supply: "1000"
+          holder_count: 12
+          trust_count: 20
+          domain_verified: true
+          blackholed: false
+          first_ledger: 100
+          last_updated: 26272654
+          remarks:
+            name: USD
+          issuer_profile:
+            account: rHb9CJAWyB4rj91VRWn96DkukG4bwdtyTh
+            domain: example.com
+            domain_verified: true
+            email_hash: null
+            transfer_rate: null
+            flags: null
+            blackholed: false
+            toml_name: Example
+            toml_description: Example issuer
+            toml_icon_url: https://example.com/icon.png
+            toml_links:
+              - url: https://example.com
+                type: website
+                title: Example
+            has_hooks: false
+            token_count: 1
+            first_ledger: 100
+            last_updated: 26272654
+          price:
+            price: 1.25
+            change_24h: 0.02
+            volume_24h: "420.5"
+            high_24h: 1.3
+            low_24h: 1.2
+        meta:
+          ledger_index: 26272654
+    TokenHolders:
+      value:
+        data:
+          - account: rHb9CJAWyB4rj91VRWn96DkukG4bwdtyTh
+            currency: USD
+            issuer: rHb9CJAWyB4rj91VRWn96DkukG4bwdtyTh
+            balance: "12.5"
+            limit_peer: "1000"
+            flags: 0
+        meta:
+          count: 1
+          page: 1
+          per_page: 20
+          ledger_index: 26272654
+    URITokenList:
+      value:
+        data:
+          - id: CCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC
+            uri: ZXZybGVhc2VMVFYAAQAACAFnfryy9275fVMVSdiyfVQDjX6kxoAAMPnVSwAAAAAAAAAAAAAAAAAAAAAA
+            uri_raw: 5a585a79624756686332564d56465941415141414341466e667279793932373566564d5653646979665651446a58366b786f41414d506e565377
+            uri_kind: onchain
+            digest: null
+            issuer: rHb9CJAWyB4rj91VRWn96DkukG4bwdtyTh
+            owner: rHb9CJAWyB4rj91VRWn96DkukG4bwdtyTh
+            flags: 1
+            sell_offer: null
+            destination: null
+            burned: false
+            burn_ledger: null
+            mint_ledger: 10
+            last_updated: 10
+            icon_url: null
+            metadata:
+              source: onchain
+              format: evrlease
+              lease_index: 0
+              name: "Evernode lease #0"
+            transfer_count: 0
+        meta:
+          count: 1
+          page: 1
+          per_page: 5
+          ledger_index: 26272654
+    URITokenDetail:
+      value:
+        data:
+          id: CCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC
+          uri: ZXZybGVhc2VMVFYAAQAACAFnfryy9275fVMVSdiyfVQDjX6kxoAAMPnVSwAAAAAAAAAAAAAAAAAAAAAA
+          uri_raw: 5a585a79624756686332564d56465941415141414341466e667279793932373566564d5653646979665651446a58366b786f41414d506e565377
+          uri_kind: onchain
+          digest: null
+          issuer: rHb9CJAWyB4rj91VRWn96DkukG4bwdtyTh
+          owner: rHb9CJAWyB4rj91VRWn96DkukG4bwdtyTh
+          flags: 1
+          sell_offer: null
+          destination: null
+          burned: false
+          burn_ledger: null
+          mint_ledger: 10
+          last_updated: 10
+          icon_url: null
+          metadata:
+            source: onchain
+            format: evrlease
+            lease_index: 0
+            name: "Evernode lease #0"
+          remarks: {}
+          transfer_count: 1
+          transfers:
+            - from_account: rHb9CJAWyB4rj91VRWn96DkukG4bwdtyTh
+              to_account: rHb9CJAWyB4rj91VRWn96DkukG4bwdtyTh
+              price: null
+              ledger_index: 11
+              tx_hash: "11"
+        meta:
+          ledger_index: 26272654
+    IssuerList:
+      value:
+        data:
+          - account: rHb9CJAWyB4rj91VRWn96DkukG4bwdtyTh
+            domain: example.com
+            domain_verified: true
+            email_hash: null
+            transfer_rate: null
+            flags: null
+            blackholed: false
+            toml_name: Example
+            toml_description: Example issuer
+            toml_icon_url: https://example.com/icon.png
+            toml_links:
+              - url: https://example.com
+                type: website
+                title: Example
+            has_hooks: false
+            token_count: 1
+            first_ledger: 100
+            last_updated: 26272654
+        meta:
+          count: 1
+          page: 1
+          per_page: 5
+          ledger_index: 26272654
+    IssuerDetail:
+      value:
+        data:
+          account: rHb9CJAWyB4rj91VRWn96DkukG4bwdtyTh
+          domain: example.com
+          domain_verified: true
+          email_hash: null
+          transfer_rate: null
+          flags: null
+          blackholed: false
+          toml_name: Example
+          toml_description: Example issuer
+          toml_icon_url: https://example.com/icon.png
+          toml_links:
+            - url: https://example.com
+              type: website
+              title: Example
+          has_hooks: false
+          token_count: 1
+          first_ledger: 100
+          last_updated: 26272654
+          remarks: {}
+          tokens: []
+          hooks: null
+        meta:
+          ledger_index: 26272654
+    Prices:
+      value:
+        data:
+          - open_time: 1717200000
+            open_ledger: 26272000
+            close_ledger: 26272654
+            open: 1.2
+            high: 1.3
+            low: 1.19
+            close: 1.25
+            volume: "420.5"
+            trade_count: 8
+        meta:
+          ledger_index: 26272654
+          history_start_ledger: 26272601
+    Trades:
+      value:
+        data:
+          - base_currency: USD
+            base_issuer: rHb9CJAWyB4rj91VRWn96DkukG4bwdtyTh
+            counter_currency: XAH
+            counter_issuer: null
+            price: 1.25
+            base_amount: "10"
+            counter_amount: "12.5"
+            taker: rHb9CJAWyB4rj91VRWn96DkukG4bwdtyTh
+            maker: rHb9CJAWyB4rj91VRWn96DkukG4bwdtyTh
+            ledger_index: 26272654
+            close_time: 1717203600
+            tx_hash: "22"
+        meta:
+          count: 1
+          page: 1
+          per_page: 5
+          ledger_index: 26272654
+          history_start_ledger: 26272601
+    HookAccounts:
+      value:
+        data:
+          - account: rHktfGUbjqzU4GsYCMc1pDjdHXb5CJamto
+            hook_count: 1
+            hooks:
+              - hook_hash: 1F7C84E14313C4FF2D4F39535428BF10767CCF8E87EFB51306CC3F94D13439EC
+                label:
+                  name: Evernode heartbeat
+                  project: Evernode
+                  description: Host heartbeats and reward distribution
+                  url: https://docs.evernode.org/en/latest/platform/hooks/overview.html
+                  source: catalog
+                triggers:
+                  raw: FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFBFFFFF
+                  mode: none
+                  types: []
+                definition:
+                  hook_hash: 1F7C84E14313C4FF2D4F39535428BF10767CCF8E87EFB51306CC3F94D13439EC
+                  code_size: 500
+                  reference_count: 12
+                  hook_fee: "74"
+                  label:
+                    name: Evernode heartbeat
+                    project: Evernode
+                    description: Host heartbeats and reward distribution
+                    url: https://docs.evernode.org/en/latest/platform/hooks/overview.html
+                    source: catalog
+            first_ledger: 100
+            last_updated: 26272654
+        meta:
+          count: 1
+          page: 1
+          per_page: 5
+          ledger_index: 26272654
+    HookAccount:
+      value:
+        data:
+          account: rHktfGUbjqzU4GsYCMc1pDjdHXb5CJamto
+          hook_count: 1
+          hooks:
+            - hook_hash: 1F7C84E14313C4FF2D4F39535428BF10767CCF8E87EFB51306CC3F94D13439EC
+              label:
+                name: Evernode heartbeat
+                project: Evernode
+                description: Host heartbeats and reward distribution
+                url: https://docs.evernode.org/en/latest/platform/hooks/overview.html
+                source: catalog
+              triggers:
+                raw: FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFBFFFFF
+                mode: none
+                types: []
+              definition:
+                hook_hash: 1F7C84E14313C4FF2D4F39535428BF10767CCF8E87EFB51306CC3F94D13439EC
+                code_size: 500
+                reference_count: 12
+                hook_fee: "74"
+                label:
+                  name: Evernode heartbeat
+                  project: Evernode
+                  description: Host heartbeats and reward distribution
+                  url: https://docs.evernode.org/en/latest/platform/hooks/overview.html
+                  source: catalog
+          first_ledger: 100
+          last_updated: 26272654
+        meta:
+          ledger_index: 26272654
+    HookDefinition:
+      value:
+        data:
+          hook_hash: 1F7C84E14313C4FF2D4F39535428BF10767CCF8E87EFB51306CC3F94D13439EC
+          hook_namespace: null
+          hook_on: FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFBFFFFF
+          hook_on_incoming: null
+          hook_on_outgoing: null
+          hook_can_emit: null
+          hook_name: null
+          hook_api_version: 0
+          parameters: []
+          reference_count: 12
+          code_size: 500
+          hook_fee: "74"
+          hook_callback_fee: null
+          hook_set_txn_id: null
+          flags: null
+          triggers:
+            raw: FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFBFFFFF
+            mode: none
+            types: []
+          label:
+            name: Evernode heartbeat
+            project: Evernode
+            description: Host heartbeats and reward distribution
+            url: https://docs.evernode.org/en/latest/platform/hooks/overview.html
+            source: catalog
+          first_ledger: 100
+          last_updated: 26272654
+        meta:
+          ledger_index: 26272654
+    HookDefinitions:
+      value:
+        data:
+          - hook_hash: 1F7C84E14313C4FF2D4F39535428BF10767CCF8E87EFB51306CC3F94D13439EC
+            code_size: 500
+            reference_count: 12
+            hook_fee: "74"
+            label:
+              name: Evernode heartbeat
+              project: Evernode
+              description: Host heartbeats and reward distribution
+              url: https://docs.evernode.org/en/latest/platform/hooks/overview.html
+              source: catalog
+        meta:
+          page: 1
+          per_page: 5
+          ledger_index: 26272654
+    SubscribeAck:
+      value:
+        type: subscribed
+        streams: [tokens, prices]
+    SubscribeEvent:
+      value:
+        stream: tokens
+        event: update
+        ledger_index: 26272654
+        data:
+          currency: USD
+          issuer: rHb9CJAWyB4rj91VRWn96DkukG4bwdtyTh
 
   responses:
     RateLimited:
@@ -750,10 +1295,27 @@ components:
         application/json:
           schema:
             $ref: '#/components/schemas/Error'
-          example:
-            error:
-              code: RATE_LIMITED
-              message: Too many requests
+          examples:
+            rate_limited:
+              $ref: '#/components/examples/RateLimited'
+    NotFound:
+      description: Not found
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          examples:
+            not_found:
+              $ref: '#/components/examples/NotFound'
+    BadRequest:
+      description: Bad request
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          examples:
+            bad_request:
+              $ref: '#/components/examples/BadRequest'
 
 paths:
   /v1/status:
@@ -761,6 +1323,7 @@ paths:
       operationId: getStatus
       tags: [status]
       summary: Indexer health, snapshot, and sync status
+      x-try: /v1/status
       responses:
         '200':
           description: OK
@@ -773,6 +1336,9 @@ paths:
                     $ref: '#/components/schemas/Status'
                   meta:
                     $ref: '#/components/schemas/Meta'
+              examples:
+                live:
+                  $ref: '#/components/examples/StatusLive'
         '429':
           $ref: '#/components/responses/RateLimited'
 
@@ -781,6 +1347,7 @@ paths:
       operationId: listTokens
       tags: [tokens]
       summary: List indexed IOU tokens
+      x-try: /v1/tokens?per_page=5
       parameters:
         - $ref: '#/components/parameters/page'
         - $ref: '#/components/parameters/per_page'
@@ -816,6 +1383,9 @@ paths:
                       $ref: '#/components/schemas/Token'
                   meta:
                     $ref: '#/components/schemas/Meta'
+              examples:
+                tokens:
+                  $ref: '#/components/examples/TokenList'
 
   /v1/tokens/{currency}/{issuer}:
     get:
@@ -837,12 +1407,11 @@ paths:
                     $ref: '#/components/schemas/TokenDetail'
                   meta:
                     $ref: '#/components/schemas/Meta'
+              examples:
+                token:
+                  $ref: '#/components/examples/TokenDetail'
         '404':
-          description: Not found
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Error'
+          $ref: '#/components/responses/NotFound'
 
   /v1/tokens/{currency}/{issuer}/holders:
     get:
@@ -874,18 +1443,18 @@ paths:
                       $ref: '#/components/schemas/TrustLine'
                   meta:
                     $ref: '#/components/schemas/Meta'
+              examples:
+                holders:
+                  $ref: '#/components/examples/TokenHolders'
         '404':
-          description: Token not found
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Error'
+          $ref: '#/components/responses/NotFound'
 
   /v1/uritokens:
     get:
       operationId: listURITokens
       tags: [uritokens]
       summary: List URITokens with resolved metadata
+      x-try: /v1/uritokens?per_page=5
       parameters:
         - $ref: '#/components/parameters/page'
         - $ref: '#/components/parameters/per_page'
@@ -926,6 +1495,9 @@ paths:
                       $ref: '#/components/schemas/URIToken'
                   meta:
                     $ref: '#/components/schemas/Meta'
+              examples:
+                uritokens:
+                  $ref: '#/components/examples/URITokenList'
 
   /v1/uritokens/{id}:
     get:
@@ -951,18 +1523,18 @@ paths:
                     $ref: '#/components/schemas/URITokenDetail'
                   meta:
                     $ref: '#/components/schemas/Meta'
+              examples:
+                uritoken:
+                  $ref: '#/components/examples/URITokenDetail'
         '404':
-          description: Not found
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Error'
+          $ref: '#/components/responses/NotFound'
 
   /v1/issuers:
     get:
       operationId: listIssuers
       tags: [issuers]
       summary: List issuer profiles
+      x-try: /v1/issuers?per_page=5
       parameters:
         - $ref: '#/components/parameters/page'
         - $ref: '#/components/parameters/per_page'
@@ -994,6 +1566,9 @@ paths:
                       $ref: '#/components/schemas/Issuer'
                   meta:
                     $ref: '#/components/schemas/Meta'
+              examples:
+                issuers:
+                  $ref: '#/components/examples/IssuerList'
 
   /v1/issuers/{account}:
     get:
@@ -1018,12 +1593,11 @@ paths:
                     $ref: '#/components/schemas/IssuerDetail'
                   meta:
                     $ref: '#/components/schemas/Meta'
+              examples:
+                issuer:
+                  $ref: '#/components/examples/IssuerDetail'
         '404':
-          description: Not found
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Error'
+          $ref: '#/components/responses/NotFound'
 
   /v1/prices/{base}/{counter}:
     get:
@@ -1066,18 +1640,13 @@ paths:
                       $ref: '#/components/schemas/OHLCVCandle'
                   meta:
                     $ref: '#/components/schemas/Meta'
+              examples:
+                candles:
+                  $ref: '#/components/examples/Prices'
         '400':
-          description: Missing issuer for an IOU side
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Error'
+          $ref: '#/components/responses/BadRequest'
         '404':
-          description: Pair not found
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Error'
+          $ref: '#/components/responses/NotFound'
 
   /v1/trades/{base}/{counter}:
     get:
@@ -1110,12 +1679,11 @@ paths:
                       $ref: '#/components/schemas/DexTrade'
                   meta:
                     $ref: '#/components/schemas/Meta'
+              examples:
+                trades:
+                  $ref: '#/components/examples/Trades'
         '404':
-          description: Pair not found
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Error'
+          $ref: '#/components/responses/NotFound'
 
   /v1/hooks/definitions:
     get:
@@ -1123,6 +1691,7 @@ paths:
       tags: [hooks]
       summary: List indexed HookDefinition objects
       description: Shared WASM metadata. `label` is attached when the hash is in the catalog.
+      x-try: /v1/hooks/definitions?per_page=5
       parameters:
         - $ref: '#/components/parameters/page'
         - $ref: '#/components/parameters/per_page'
@@ -1140,6 +1709,9 @@ paths:
                       $ref: '#/components/schemas/HookDefinition'
                   meta:
                     $ref: '#/components/schemas/Meta'
+              examples:
+                definitions:
+                  $ref: '#/components/examples/HookDefinitions'
 
   /v1/hooks/definitions/{hook_hash}:
     get:
@@ -1164,12 +1736,11 @@ paths:
                     $ref: '#/components/schemas/HookDefinition'
                   meta:
                     $ref: '#/components/schemas/Meta'
+              examples:
+                definition:
+                  $ref: '#/components/examples/HookDefinition'
         '404':
-          description: Hook definition not indexed
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Error'
+          $ref: '#/components/responses/NotFound'
 
   /v1/hooks/{account}:
     get:
@@ -1197,18 +1768,18 @@ paths:
                     $ref: '#/components/schemas/HookState'
                   meta:
                     $ref: '#/components/schemas/Meta'
+              examples:
+                hooks:
+                  $ref: '#/components/examples/HookAccount'
         '404':
-          description: Account has no indexed Hooks
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Error'
+          $ref: '#/components/responses/NotFound'
 
   /v1/hooks:
     get:
       operationId: listHookAccounts
       tags: [hooks]
       summary: List accounts with an active Hook ledger object
+      x-try: /v1/hooks?per_page=5
       parameters:
         - $ref: '#/components/parameters/page'
         - $ref: '#/components/parameters/per_page'
@@ -1230,3 +1801,47 @@ paths:
                       $ref: '#/components/schemas/HookState'
                   meta:
                     $ref: '#/components/schemas/Meta'
+              examples:
+                accounts:
+                  $ref: '#/components/examples/HookAccounts'
+
+  /v1/subscribe:
+    get:
+      operationId: subscribe
+      tags: [subscribe]
+      summary: Real-time token, URIToken, price, and hook streams
+      description: >
+        One connection, multiple streams. The API listens on the same port — no
+        separate WS host. `unsubscribe` uses the same shape. Unknown commands and
+        invalid JSON return the standard `error` object. When the operator cap is
+        on, extra sockets from the same IP are rejected with `RATE_LIMITED`.
+      x-websocket: true
+      x-messages:
+        - title: Subscribe
+          value:
+            command: subscribe
+            streams: [tokens, uritokens, prices, hooks]
+        - title: Ack
+          value:
+            type: subscribed
+            streams: [tokens, prices]
+        - title: Event
+          value:
+            stream: tokens
+            event: update
+            ledger_index: 26272654
+            data:
+              currency: USD
+              issuer: rHb9CJAWyB4rj91VRWn96DkukG4bwdtyTh
+      responses:
+        '200':
+          description: JSON messages after the WebSocket upgrade
+          content:
+            application/json:
+              examples:
+                subscribed:
+                  $ref: '#/components/examples/SubscribeAck'
+                event:
+                  $ref: '#/components/examples/SubscribeEvent'
+        '429':
+          $ref: '#/components/responses/RateLimited'

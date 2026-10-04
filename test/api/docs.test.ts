@@ -1,7 +1,17 @@
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import { afterEach, describe, it } from 'node:test';
 
 import { buildApi } from '../../src/api/index.js';
+import { renderCookbookMarkdown, replaceCookbookSection } from '../../src/api/docsPage.js';
+import {
+  exampleValues,
+  loadOpenApi,
+  loadOpenApiYaml,
+  operationsOf,
+  parseOpenApi,
+  resolveResponse,
+} from '../../src/api/openapi.js';
 import { closeDatabase, openDatabase, type SqliteDatabase } from '../../src/db/client.js';
 import { testConfig, testRuntime } from '../helpers.js';
 
@@ -14,7 +24,7 @@ afterEach(() => {
 });
 
 describe('API docs', () => {
-  it('serves the branded docs page and OpenAPI contract', async () => {
+  it('serves a page generated from OpenAPI, plus the contract and cookbook', async () => {
     const db = openDatabase(':memory:');
     dbs.push(db);
     const app = await buildApi({
@@ -29,22 +39,64 @@ describe('API docs', () => {
     assert.match(docs.body, /XahauIndex/);
     assert.match(docs.body, /\/v1\/tokens\/\{currency\}\/\{issuer\}/);
     assert.match(docs.body, /\/v1\/subscribe/);
-    assert.match(docs.body, /source: "onchain"/);
+    assert.match(docs.body, /"source": "onchain"/);
     assert.match(docs.body, /RATE_LIMITED/);
     assert.match(docs.body, /\/v1\/hooks\/definitions/);
     assert.match(docs.body, /Evernode heartbeat/);
     assert.match(docs.body, /Recipes/);
+    assert.match(docs.body, /Cookbook/);
+    assert.match(docs.body, /curl -s '?http:\/\/localhost:3000\/v1\/tokens/);
+    assert.match(docs.body, /curl -s '?http:\/\/localhost:3000\/v1\/uritokens/);
+    assert.match(docs.body, /curl -s '?http:\/\/localhost:3000\/v1\/prices/);
+
+    const css = await app.inject({ method: 'GET', url: '/docs/docs.css' });
+    assert.equal(css.statusCode, 200);
+    assert.match(css.headers['content-type'] ?? '', /text\/css/);
+
+    const root = await app.inject({ method: 'GET', url: '/' });
+    assert.equal(root.statusCode, 200);
+    assert.match(root.body, /XahauIndex/);
 
     const spec = await app.inject({ method: 'GET', url: '/v1/openapi.yaml' });
     assert.equal(spec.statusCode, 200);
     assert.match(spec.body, /openapi: 3.1.0/);
     assert.match(spec.body, /title: XahauIndex API/);
     assert.match(spec.body, /HookLabel/);
+    assert.match(spec.body, /x-cookbook:/);
 
-    const root = await app.inject({ method: 'GET', url: '/' });
-    assert.equal(root.statusCode, 200);
-    assert.match(root.body, /XahauIndex/);
+    const cookbook = await app.inject({ method: 'GET', url: '/docs/cookbook.md' });
+    assert.equal(cookbook.statusCode, 200);
+    assert.match(cookbook.body, /curl -s http:\/\/localhost:3000\/v1\/status/);
 
     await app.close();
+  });
+
+  it('requires a response example on every path', () => {
+    const spec = loadOpenApi();
+    for (const { path, method, operation } of operationsOf(spec)) {
+      const ok = operation.responses?.['200'] ?? operation.responses?.['101'];
+      assert.ok(ok, `${method.toUpperCase()} ${path} is missing a 200/101 response`);
+      const resolved = resolveResponse(spec, ok);
+      const media = resolved.content?.['application/json'];
+      const values = exampleValues(spec, media);
+      const messages = operation['x-messages'] ?? [];
+      assert.ok(
+        values.length > 0 || messages.length > 0,
+        `${method.toUpperCase()} ${path} needs a JSON example or x-messages`,
+      );
+    }
+  });
+
+  it('keeps cookbook.md and README in sync with OpenAPI', () => {
+    const spec = parseOpenApi(loadOpenApiYaml());
+    const cookbook = renderCookbookMarkdown(spec);
+    assert.equal(readFileSync('docs/cookbook.md', 'utf8'), cookbook);
+    const readme = readFileSync('README.md', 'utf8');
+    assert.equal(
+      readme,
+      replaceCookbookSection(readme, renderCookbookMarkdown(spec, { standalone: false })),
+    );
+    assert.match(readme, /curl -s '?http:\/\/localhost:3000\/v1\/tokens/);
+    assert.match(readme, /curl -s '?http:\/\/localhost:3000\/v1\/prices/);
   });
 });

@@ -63,7 +63,9 @@ src/
     dex.ts          — DEX executions → OHLCV candles
   api/
     index.ts        — Fastify plugin registration
-    routes/         — one file per resource group (docs.ts serves / and /docs)
+    routes/         — one file per resource group (docs.ts serves generated /docs)
+    docsPage.ts     — branded HTML + cookbook markdown from OpenAPI
+    openapi.ts      — load / parse docs/openapi.yaml
     schemas/        — TypeBox schemas for request params + response shapes
   util/
     xahau.ts        — currency normalisation, account validation, hex helpers, blackhole
@@ -72,12 +74,13 @@ src/
     hookLabels.ts   — static Evernode (and later) hook-hash / account labels
     uriPayload.ts   — classify URI + decode on-chain URI blobs (Evernode evrlease)
     retry.ts        — exponential backoff
-public/docs/        — branded API docs page
+public/docs/        — docs.css for the generated /docs page
 dist/               — compiled output (gitignored)
 docs/
   implementation-plan.md
   architecture.md
-  openapi.yaml
+  openapi.yaml      — source of truth for /docs, cookbook, and README curls
+  cookbook.md       — generated (`npm run docs:sync`)
 test/               — mirrors src/ structure
 ```
 
