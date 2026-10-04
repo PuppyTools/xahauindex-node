@@ -59,6 +59,8 @@ API_HOST=0.0.0.0
 LOG_LEVEL=info
 # BACKFILL_FROM_LEDGER=genesis
 # BACKFILL_LOOKBACK=10000
+# BACKFILL_XAHAUD_URL=wss://your-full-history-node
+# BACKFILL_ENV=.env.backfill
 ```
 
 Default network is **Xahau mainnet**. A public WebSocket is fine for development; a local xahaud is better for snapshot speed.
@@ -69,8 +71,10 @@ Historical backfill is **off** unless you set one of:
 |----------|---------|
 | `BACKFILL_FROM_LEDGER` | Absolute start ledger. `genesis` / `start` = `1`. Alias: `FULL_HISTORY_START`. |
 | `BACKFILL_LOOKBACK` | Start at `snapshot_ledger - LOOKBACK + 1` when `FROM` is unset. |
+| `BACKFILL_XAHAUD_URL` | Dedicated full-history node for backfill only (`ws`/`wss` or `http`/`https` JSON-RPC). Live subscribe still uses `XAHAUD_URL`. |
+| `BACKFILL_ENV` | Optional second env file. `XAHAUD_URL` or `BACKFILL_XAHAUD_URL` in that file is the history node. Defaults to `.env.backfill` when that file exists. |
 
-If both are set, `BACKFILL_FROM_LEDGER` wins. Public nodes often cannot serve very old ledgers; those indexes are retried, then skipped. The snapshot remains the source of current balances, owners, issuers, and Hooks. Backfill records DEX trades and URIToken transfers only.
+If both start bounds are set, `BACKFILL_FROM_LEDGER` wins. Use a full-history node for backfill when the subscription node does not keep old ledgers. Public nodes that still cannot serve an index are retried, then skipped. The snapshot remains the source of current balances, owners, issuers, and Hooks. Backfill records DEX trades and URIToken transfers only.
 
 ---
 

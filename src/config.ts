@@ -1,7 +1,11 @@
-import { config as loadDotenv } from 'dotenv';
+import { existsSync, readFileSync } from 'node:fs';
+
+import { config as loadDotenv, parse as parseDotenv } from 'dotenv';
 
 export const LOG_LEVELS = ['trace', 'debug', 'info', 'warn', 'error'] as const;
 export type LogLevel = (typeof LOG_LEVELS)[number];
+
+export const DEFAULT_BACKFILL_ENV = '.env.backfill';
 
 export interface Config {
   xahaudUrl: string;
@@ -13,6 +17,13 @@ export interface Config {
   backfillFromLedger: number | null;
   /** If `backfillFromLedger` is unset, start at `snapshot - lookback + 1`. */
   backfillLookback: number | null;
+  /**
+   * Dedicated history node for backfill (`ws`/`wss` or `http`/`https` JSON-RPC).
+   * Null means reuse `xahaudUrl`.
+   */
+  backfillXahaudUrl: string | null;
+  /** Second env file that supplied the backfill node URL, if any. */
+  backfillEnvPath: string | null;
 }
 
 export class ConfigError extends Error {
@@ -50,18 +61,78 @@ function readLogLevel(env: NodeJS.ProcessEnv): LogLevel {
   throw new ConfigError(`LOG_LEVEL must be one of: ${LOG_LEVELS.join(', ')}`);
 }
 
+function parseUrl(raw: string, key: string): URL {
+  try {
+    return new URL(raw);
+  } catch {
+    throw new ConfigError(`${key} must be a valid URL`);
+  }
+}
+
 function readWebsocketUrl(env: NodeJS.ProcessEnv): string {
   const url = readString(env, 'XAHAUD_URL', 'wss://xahau.network');
-  let parsed: URL;
-  try {
-    parsed = new URL(url);
-  } catch {
-    throw new ConfigError('XAHAUD_URL must be a valid WebSocket URL');
-  }
+  const parsed = parseUrl(url, 'XAHAUD_URL');
   if (parsed.protocol !== 'ws:' && parsed.protocol !== 'wss:') {
     throw new ConfigError('XAHAUD_URL must use ws:// or wss://');
   }
   return url;
+}
+
+function readBackfillNodeUrl(raw: string, key: string): string {
+  const parsed = parseUrl(raw, key);
+  if (
+    parsed.protocol !== 'ws:' &&
+    parsed.protocol !== 'wss:' &&
+    parsed.protocol !== 'http:' &&
+    parsed.protocol !== 'https:'
+  ) {
+    throw new ConfigError(`${key} must use ws://, wss://, http://, or https://`);
+  }
+  return raw;
+}
+
+function readBackfillEnvFile(path: string): Record<string, string> {
+  if (!existsSync(path)) {
+    throw new ConfigError(`BACKFILL_ENV file not found: ${path}`);
+  }
+  return parseDotenv(readFileSync(path, 'utf8'));
+}
+
+function resolveBackfillEnvPath(env: NodeJS.ProcessEnv): string | null {
+  const raw = env.BACKFILL_ENV;
+  if (raw !== undefined && raw.trim() !== '') {
+    return raw.trim();
+  }
+  if (env === process.env && existsSync(DEFAULT_BACKFILL_ENV)) {
+    return DEFAULT_BACKFILL_ENV;
+  }
+  return null;
+}
+
+function readBackfillNode(env: NodeJS.ProcessEnv): {
+  backfillXahaudUrl: string | null;
+  backfillEnvPath: string | null;
+} {
+  const direct = env.BACKFILL_XAHAUD_URL;
+  if (direct !== undefined && direct.trim() !== '') {
+    return {
+      backfillXahaudUrl: readBackfillNodeUrl(direct.trim(), 'BACKFILL_XAHAUD_URL'),
+      backfillEnvPath: null,
+    };
+  }
+  const envPath = resolveBackfillEnvPath(env);
+  if (envPath === null) {
+    return { backfillXahaudUrl: null, backfillEnvPath: null };
+  }
+  const fileEnv = readBackfillEnvFile(envPath);
+  const fromFile = fileEnv.BACKFILL_XAHAUD_URL ?? fileEnv.XAHAUD_URL;
+  if (fromFile === undefined || fromFile.trim() === '') {
+    return { backfillXahaudUrl: null, backfillEnvPath: envPath };
+  }
+  return {
+    backfillXahaudUrl: readBackfillNodeUrl(fromFile.trim(), 'BACKFILL_XAHAUD_URL'),
+    backfillEnvPath: envPath,
+  };
 }
 
 function readOptionalPositiveInt(env: NodeJS.ProcessEnv, key: string): number | null {
@@ -105,7 +176,12 @@ export function resolveBackfillFrom(config: Config, snapshotLedger: number): num
   return null;
 }
 
+export function resolveBackfillSourceUrl(config: Config): string {
+  return config.backfillXahaudUrl ?? config.xahaudUrl;
+}
+
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
+  const backfillNode = readBackfillNode(env);
   return {
     xahaudUrl: readWebsocketUrl(env),
     dbPath: readString(env, 'DB_PATH', './data/xahauindex.db'),
@@ -114,6 +190,8 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     logLevel: readLogLevel(env),
     backfillFromLedger: readBackfillFromLedger(env),
     backfillLookback: readOptionalPositiveInt(env, 'BACKFILL_LOOKBACK'),
+    backfillXahaudUrl: backfillNode.backfillXahaudUrl,
+    backfillEnvPath: backfillNode.backfillEnvPath,
   };
 }
 

@@ -42,6 +42,79 @@ function asLedgerRecord(value: unknown): Record<string, unknown> {
   return typeof value === 'object' && value !== null ? (value as Record<string, unknown>) : {};
 }
 
+function isHttpUrl(url: string): boolean {
+  const protocol = new URL(url).protocol;
+  return protocol === 'http:' || protocol === 'https:';
+}
+
+export function createJsonRpcSource(url: string): XahauSource {
+  const requestLedger = async (ledgerIndex: number | 'validated'): Promise<ClosedLedger> => {
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        method: 'ledger',
+        params: [
+          {
+            ledger_index: ledgerIndex,
+            transactions: true,
+            expand: true,
+          },
+        ],
+      }),
+      signal: AbortSignal.timeout(30_000),
+    });
+    if (!response.ok) {
+      throw new Error(`JSON-RPC ${response.status} from ${url}`);
+    }
+    const body = (await response.json()) as {
+      result?: {
+        status?: string;
+        error?: string;
+        error_message?: string;
+        ledger_index?: number;
+        ledger_hash?: string;
+        ledger?: Record<string, unknown>;
+      };
+      error?: string;
+    };
+    const result = body.result;
+    if (!result || result.status === 'error' || result.error || body.error) {
+      throw new Error(result?.error_message ?? result?.error ?? body.error ?? 'JSON-RPC ledger failed');
+    }
+    const ledger = asLedgerRecord(result.ledger);
+    const index = Number(result.ledger_index ?? ledger.ledger_index ?? ledgerIndex);
+    const hash = String(result.ledger_hash ?? ledger.ledger_hash ?? '');
+    const closeTime = unixSecondsFromRipple(Number(ledger.close_time ?? 0));
+    const transactions = Array.isArray(ledger.transactions) ? ledger.transactions : [];
+    return { index, hash, closeTime, transactions };
+  };
+
+  return {
+    connect: async () => undefined,
+    disconnect: async () => undefined,
+    getValidatedLedger: async () => {
+      const ledger = await requestLedger('validated');
+      return { index: ledger.index, hash: ledger.hash, closeTime: ledger.closeTime };
+    },
+    getLedgerDataPage: async () => {
+      throw new Error('JSON-RPC backfill source does not page ledger_data');
+    },
+    getLedgerWithTransactions: async (ledgerIndex) => requestLedger(ledgerIndex),
+    subscribeLedgers: async () => {
+      throw new Error('JSON-RPC backfill source does not subscribe');
+    },
+    onLedgerClosed: () => () => undefined,
+  };
+}
+
+export function createBackfillSource(url: string): XahauSource {
+  if (isHttpUrl(url)) {
+    return createJsonRpcSource(url);
+  }
+  return createXahauSource(url);
+}
+
 export function createXahauSource(url: string): XahauSource {
   const client = new Client(url);
   const listeners = new Set<(ledger: ValidatedLedger) => void>();

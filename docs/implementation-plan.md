@@ -376,6 +376,8 @@ API_HOST=0.0.0.0
 LOG_LEVEL=info
 # BACKFILL_FROM_LEDGER=genesis
 # BACKFILL_LOOKBACK=10000
+# BACKFILL_XAHAUD_URL=wss://your-full-history-node
+# BACKFILL_ENV=.env.backfill
 # FULL_HISTORY_START=
 ```
 

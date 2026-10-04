@@ -11,6 +11,8 @@ export function testConfig(overrides: Partial<Config> = {}): Config {
     logLevel: 'error',
     backfillFromLedger: null,
     backfillLookback: null,
+    backfillXahaudUrl: null,
+    backfillEnvPath: null,
     ...overrides,
   };
 }

@@ -41,7 +41,7 @@ XahauIndex has three layers: an **ingester** (snapshot + live WebSocket), a **SQ
 2. Connect `@transia/xrpl` `Client` to `XAHAUD_URL` (default mainnet).
 3. If `indexer_state.snapshot_status` is not `complete`, run the snapshot.
 4. Start the TOML worker.
-5. If `BACKFILL_FROM_LEDGER` or `BACKFILL_LOOKBACK` is set, walk closed ledgers `FROM..L` in history mode (DEX trades + URIToken transfers only). Resume via `backfill_next`. Missing historical ledgers are retried, then skipped.
+5. If `BACKFILL_FROM_LEDGER` or `BACKFILL_LOOKBACK` is set, walk closed ledgers `FROM..L` in history mode (DEX trades + URIToken transfers only). History fetches use `BACKFILL_XAHAUD_URL` or a second env file (`BACKFILL_ENV` / `.env.backfill`) when set, otherwise `XAHAUD_URL`. Resume via `backfill_next`. Missing historical ledgers are retried, then skipped.
 6. Subscribe to `ledger`. Ignore live apply at or before `snapshot_ledger`. Live starts at `max(MAX(ledgers)+1, live_from_ledger)` and never below `L+1`.
 7. Listen on `API_HOST:API_PORT`. No auth.
 
@@ -79,6 +79,7 @@ Optional. After snapshot, if `BACKFILL_FROM_LEDGER` (alias `FULL_HISTORY_START`;
 - Missing tokens get a full apply, then a burn when the node is a `DeletedNode`.
 - RippleState, AccountRoot, SetRemarks, and SetHook are not applied.
 - Public nodes that cannot serve an old ledger: retry, then skip and persist `backfill_next`.
+- Optional dedicated history node (`BACKFILL_XAHAUD_URL`, or `XAHAUD_URL` inside `BACKFILL_ENV` / `.env.backfill`) so live subscribe can stay on a short-history websocket. `http`/`https` uses JSON-RPC `ledger`; `ws`/`wss` uses the same client as live.
 - Runs in parallel with live follow. Historical rows below `L` do not move `MAX(ledgers)` past the snapshot.
 
 ---

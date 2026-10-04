@@ -1,7 +1,10 @@
 import assert from 'node:assert/strict';
+import { mkdtempSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { describe, it } from 'node:test';
 
-import { ConfigError, loadConfig, resolveBackfillFrom } from '../src/config.js';
+import { ConfigError, loadConfig, resolveBackfillFrom, resolveBackfillSourceUrl } from '../src/config.js';
 
 describe('loadConfig', () => {
   it('uses mainnet defaults', () => {
@@ -72,5 +75,47 @@ describe('loadConfig', () => {
   it('rejects invalid backfill bounds', () => {
     assert.throws(() => loadConfig({ BACKFILL_FROM_LEDGER: '0' }), ConfigError);
     assert.throws(() => loadConfig({ BACKFILL_LOOKBACK: 'nope' }), ConfigError);
+  });
+
+  it('reads a dedicated backfill node URL', () => {
+    const ws = loadConfig({ BACKFILL_XAHAUD_URL: 'wss://history.example' });
+    assert.equal(ws.backfillXahaudUrl, 'wss://history.example');
+    assert.equal(resolveBackfillSourceUrl(ws), 'wss://history.example');
+    const rpc = loadConfig({ BACKFILL_XAHAUD_URL: 'https://history.example:51234' });
+    assert.equal(rpc.backfillXahaudUrl, 'https://history.example:51234');
+    const fallback = loadConfig({});
+    assert.equal(fallback.backfillXahaudUrl, null);
+    assert.equal(resolveBackfillSourceUrl(fallback), 'wss://xahau.network');
+  });
+
+  it('reads the backfill node from a second env file', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'xahauindex-backfill-env-'));
+    const file = join(dir, '.env.history');
+    writeFileSync(file, 'XAHAUD_URL=wss://archive.example\n');
+    const config = loadConfig({
+      XAHAUD_URL: 'wss://live.example',
+      BACKFILL_ENV: file,
+    });
+    assert.equal(config.xahaudUrl, 'wss://live.example');
+    assert.equal(config.backfillXahaudUrl, 'wss://archive.example');
+    assert.equal(config.backfillEnvPath, file);
+    assert.equal(resolveBackfillSourceUrl(config), 'wss://archive.example');
+  });
+
+  it('lets BACKFILL_XAHAUD_URL win over the second env file', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'xahauindex-backfill-env-'));
+    const file = join(dir, '.env.history');
+    writeFileSync(file, 'XAHAUD_URL=wss://archive.example\n');
+    const config = loadConfig({
+      BACKFILL_XAHAUD_URL: 'https://override.example',
+      BACKFILL_ENV: file,
+    });
+    assert.equal(config.backfillXahaudUrl, 'https://override.example');
+    assert.equal(config.backfillEnvPath, null);
+  });
+
+  it('rejects a missing BACKFILL_ENV file and a bad backfill URL', () => {
+    assert.throws(() => loadConfig({ BACKFILL_ENV: '/tmp/xahauindex-missing.env' }), ConfigError);
+    assert.throws(() => loadConfig({ BACKFILL_XAHAUD_URL: 'ftp://history.example' }), ConfigError);
   });
 });

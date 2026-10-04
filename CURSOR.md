@@ -134,6 +134,8 @@ Copy `.env.example` to `.env`. Never commit `.env`.
 - `LOG_LEVEL` — `trace|debug|info|warn|error`
 - `BACKFILL_FROM_LEDGER` — optional absolute start (`genesis`/`start` = `1`). Alias: `FULL_HISTORY_START`.
 - `BACKFILL_LOOKBACK` — if `FROM` is unset, start at `snapshot - lookback + 1`. Neither set = no backfill.
+- `BACKFILL_XAHAUD_URL` — optional dedicated history node (`ws`/`wss` or `http`/`https` JSON-RPC). Unset = reuse `XAHAUD_URL`.
+- `BACKFILL_ENV` — optional second env file for that node URL. Auto-loads `.env.backfill` when present.
 
 ## Running locally
 

@@ -6,7 +6,11 @@ import { listDexTrades, listOhlcvCandles } from '../../src/db/queries/dex.js';
 import { getIndexerState, getLatestLedgerIndex, setIndexerState, upsertLedger } from '../../src/db/queries/indexer.js';
 import { getToken, getTrustLine, upsertTrustLine } from '../../src/db/queries/tokens.js';
 import { getUriToken, listUriTokenTransfers, upsertUriToken } from '../../src/db/queries/uritokens.js';
+import { createServer } from 'node:http';
+import type { AddressInfo } from 'node:net';
+
 import { runBackfill } from '../../src/ingester/backfill.js';
+import { runDedicatedBackfill } from '../../src/ingester/index.js';
 import { applyClosedLedger, applyHistoricalLedger } from '../../src/ingester/ledger.js';
 import type { ClosedLedger } from '../../src/ingester/source.js';
 import { silentLog, testConfig } from '../helpers.js';
@@ -366,5 +370,74 @@ describe('runBackfill', () => {
     assert.equal(resumed.skipped, false);
     assert.deepEqual(requested, [10]);
     assert.equal(getIndexerState(db, 'backfill_status'), 'complete');
+  });
+});
+
+describe('runDedicatedBackfill', () => {
+  it('keeps live subscribe on XAHAUD_URL and fetches history from JSON-RPC', async () => {
+    const requested: number[] = [];
+    const server = createServer((req, res) => {
+      const chunks: Buffer[] = [];
+      req.on('data', (chunk) => {
+        chunks.push(chunk);
+      });
+      req.on('end', () => {
+        const body = JSON.parse(Buffer.concat(chunks).toString()) as {
+          params: Array<{ ledger_index: number }>;
+        };
+        const index = body.params[0]?.ledger_index ?? 0;
+        requested.push(index);
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(
+          JSON.stringify({
+            result: {
+              status: 'success',
+              ledger_index: index,
+              ledger_hash: 'a'.repeat(64),
+              ledger: {
+                ledger_index: index,
+                close_time: 738_000_000,
+                transactions: [],
+              },
+            },
+          }),
+        );
+      });
+    });
+    await new Promise<void>((resolve) => {
+      server.listen(0, '127.0.0.1', resolve);
+    });
+    const { port } = server.address() as AddressInfo;
+    const db = memoryDb();
+    seedSnapshot(db, 12);
+    try {
+      const result = await runDedicatedBackfill({
+        db,
+        liveSource: {
+          getLedgerWithTransactions: async () => {
+            throw new Error('live node should not serve backfill');
+          },
+        },
+        config: testConfig({
+          xahaudUrl: 'wss://live.example',
+          backfillFromLedger: 11,
+          backfillXahaudUrl: `http://127.0.0.1:${port}`,
+        }),
+        log: silentLog,
+      });
+      assert.equal(result.skipped, false);
+      assert.deepEqual(requested, [11, 12]);
+      assert.equal(getIndexerState(db, 'backfill_status'), 'complete');
+    } finally {
+      await new Promise<void>((resolve, reject) => {
+        server.close((error) => {
+          if (error) {
+            reject(error);
+            return;
+          }
+          resolve();
+        });
+      });
+    }
   });
 });
