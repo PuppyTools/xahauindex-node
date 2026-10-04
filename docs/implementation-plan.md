@@ -56,7 +56,7 @@ That implies endpoints the original draft omitted: **holders**, **trades**, and 
 | Build | `tsc` → `dist/` |
 | DB | SQLite via `better-sqlite3`, WAL, numbered SQL migrations |
 | Ledger | `@transia/xrpl` `Client` |
-| HTTP | Fastify v4 + TypeBox |
+| HTTP | Fastify v5 + TypeBox |
 | WS | `@fastify/websocket` |
 | Config | `dotenv` |
 | Logs | `pino` |

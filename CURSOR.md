@@ -17,7 +17,7 @@ Repo: `github.com/PuppyTools/xahauindex-node`
 | Build | `tsc` → `dist/` | Standard, no bundler complexity needed |
 | Database | SQLite (`better-sqlite3`) | Zero-dependency self-hosting |
 | Ledger client | `@transia/xrpl` | Xahau-specific types (URIToken, SetHook, SetRemarks) |
-| HTTP server | Fastify v4 + TypeBox | Performance, compile-time safe schemas |
+| HTTP server | Fastify v5 + TypeBox | Performance, compile-time safe schemas |
 | WS server | `@fastify/websocket` | Integrates with Fastify lifecycle |
 | Migrations | numbered SQL files, append-only | Simple |
 | Config | `dotenv` | Standard |

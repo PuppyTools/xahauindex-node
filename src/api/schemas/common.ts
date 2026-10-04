@@ -1,4 +1,4 @@
-import { Type } from '@sinclair/typebox';
+import { Type } from 'typebox';
 
 export const MetaSchema = Type.Object({
   ledger_index: Type.Integer(),
