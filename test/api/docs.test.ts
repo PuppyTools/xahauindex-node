@@ -55,6 +55,7 @@ describe('API docs', () => {
     assert.match(docs.body, /curl -s '?http:\/\/localhost:3000\/v1\/tokens/);
     assert.match(docs.body, /curl -s '?http:\/\/localhost:3000\/v1\/uritokens/);
     assert.match(docs.body, /curl -s '?http:\/\/localhost:3000\/v1\/prices/);
+    assert.match(docs.body, /href="http:\/\/localhost:3000\/v1\/status"/);
     assert.match(docs.body, />Status</);
     assert.match(docs.body, />Data Range</);
     assert.match(docs.body, /id="range"/);
@@ -66,6 +67,8 @@ describe('API docs', () => {
     assert.doesNotMatch(docs.body, /missing data layer/);
     assert.doesNotMatch(docs.body, /class="chip"/);
     assert.match(docs.body, /rPUPpkfohJsWVoXoXDbNZ7zKfk2FBB8Xwo/);
+    assert.match(docs.body, /not affiliated with/);
+    assert.match(docs.body, /Xahau\/Graphics/);
     assert.doesNotMatch(docs.body, /Try this node/);
 
     const mark = await app.inject({ method: 'GET', url: '/docs/xi.svg' });
@@ -99,6 +102,40 @@ describe('API docs', () => {
     const cookbook = await app.inject({ method: 'GET', url: '/docs/cookbook.md' });
     assert.equal(cookbook.statusCode, 200);
     assert.match(cookbook.body, /curl -s http:\/\/localhost:3000\/v1\/status/);
+    assert.match(cookbook.body, /not affiliated with/);
+    assert.match(cookbook.body, /Xahau\/Graphics/);
+
+    await app.close();
+  });
+
+  it('rewrites cookbook curls and Open links to API_BASE_URL', async () => {
+    const db = openDatabase(':memory:');
+    dbs.push(db);
+    const app = await buildApi({
+      db,
+      config: testConfig({ apiBaseUrl: 'https://index.example.com' }),
+      runtime: testRuntime(),
+    });
+
+    const docs = await app.inject({ method: 'GET', url: '/docs' });
+    assert.equal(docs.statusCode, 200);
+    assert.match(docs.body, /curl -s '?https:\/\/index\.example\.com\/v1\/status/);
+    assert.match(docs.body, /curl -s '?https:\/\/index\.example\.com\/v1\/tokens/);
+    assert.match(docs.body, /npx wscat -c wss:\/\/index\.example\.com\/v1\/subscribe/);
+    assert.match(docs.body, /href="https:\/\/index\.example\.com\/v1\/status"/);
+    assert.match(docs.body, /href="https:\/\/index\.example\.com\/v1\/tokens\?per_page=5"/);
+    assert.doesNotMatch(docs.body, /http:\/\/localhost:3000/);
+    assert.doesNotMatch(docs.body, /ws:\/\/localhost:3000/);
+
+    const cookbook = await app.inject({ method: 'GET', url: '/docs/cookbook.md' });
+    assert.equal(cookbook.statusCode, 200);
+    assert.match(cookbook.body, /Base URL: `https:\/\/index\.example\.com`/);
+    assert.match(cookbook.body, /curl -s https:\/\/index\.example\.com\/v1\/status/);
+
+    const spec = await app.inject({ method: 'GET', url: '/v1/openapi.yaml' });
+    assert.equal(spec.statusCode, 200);
+    assert.match(spec.body, /url: https:\/\/index\.example\.com/);
+    assert.doesNotMatch(spec.body, /http:\/\/localhost:3000/);
 
     await app.close();
   });
@@ -167,5 +204,7 @@ describe('API docs', () => {
     );
     assert.match(readme, /curl -s '?http:\/\/localhost:3000\/v1\/tokens/);
     assert.match(readme, /curl -s '?http:\/\/localhost:3000\/v1\/prices/);
+    assert.match(readme, /not affiliated with/);
+    assert.match(readme, /Xahau\/Graphics/);
   });
 });

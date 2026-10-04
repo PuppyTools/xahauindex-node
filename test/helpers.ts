@@ -1,4 +1,4 @@
-import type { Config } from '../src/config.js';
+import { DEFAULT_API_BASE_URL, type Config } from '../src/config.js';
 import type { Runtime } from '../src/runtime.js';
 import type { IssuerRow, TokenRow } from '../src/types/db.js';
 
@@ -8,6 +8,7 @@ export function testConfig(overrides: Partial<Config> = {}): Config {
     dbPath: ':memory:',
     apiPort: 3000,
     apiHost: '127.0.0.1',
+    apiBaseUrl: DEFAULT_API_BASE_URL,
     logLevel: 'error',
     backfillFromLedger: null,
     backfillLookback: null,

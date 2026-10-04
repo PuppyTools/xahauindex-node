@@ -4,7 +4,7 @@
 
 ## Project summary
 
-XahauIndex is a **self-hostable Node.js + TypeScript metadata indexer for the Xahau network** (smart-contract sidechain of the XRP Ledger). It snapshots the current validated ledger, then follows live streams, and exposes an enriched REST + WebSocket API for IOU tokens, URITokens, issuer profiles, DEX prices, and Hook activity.
+XahauIndex is a **self-hostable Node.js + TypeScript metadata indexer for the Xahau network** (smart-contract sidechain of the XRP Ledger). It snapshots the current validated ledger, then follows live streams, and exposes an enriched REST + WebSocket API for IOU tokens, URITokens, issuer profiles, DEX prices, and Hook activity. Independent PuppyTools project — not affiliated with Xahau. XI mark inspired by [Xahau/Graphics](https://github.com/Xahau/Graphics).
 
 Repo: `github.com/PuppyTools/xahauindex-node`
 
@@ -139,6 +139,7 @@ Copy `.env.example` to `.env`. Never commit `.env`.
 - `XAHAUD_URL` — default `wss://xahau.network`
 - `DB_PATH` — default `./data/xahauindex.db`
 - `API_PORT` / `API_HOST` — default `3000` / `0.0.0.0`
+- `API_BASE_URL` — public origin for `/docs` cookbook curls, Open links, and `/v1/openapi.yaml`. Default `http://localhost:3000`. Does not change the listen address.
 - `LOG_LEVEL` — `trace|debug|info|warn|error`
 - `BACKFILL_FROM_LEDGER` — optional earliest ledger the walk stops at (`genesis`/`start` = `1`). Alias: `FULL_HISTORY_START`.
 - `BACKFILL_LOOKBACK` — if `FROM` is unset, stop at `snapshot - lookback + 1`. Neither set = no backfill. Walk is snapshot → FROM.

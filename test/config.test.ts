@@ -6,13 +6,16 @@ import { describe, it } from 'node:test';
 
 import {
   ConfigError,
+  DEFAULT_API_BASE_URL,
   DEFAULT_API_RATE_LIMIT_WINDOW_MS,
   DEFAULT_WS_MAX_PER_IP,
   loadConfig,
   resolveBackfillFrom,
   resolveBackfillMinIntervalMs,
   resolveBackfillSourceUrl,
+  resolveWsBaseUrl,
   resolveWsMaxPerIp,
+  rewriteDocsBaseUrl,
   SHARED_BACKFILL_INTERVAL_MS,
 } from '../src/config.js';
 
@@ -23,6 +26,7 @@ describe('loadConfig', () => {
     assert.equal(config.dbPath, './data/xahauindex.db');
     assert.equal(config.apiPort, 3000);
     assert.equal(config.apiHost, '0.0.0.0');
+    assert.equal(config.apiBaseUrl, DEFAULT_API_BASE_URL);
     assert.equal(config.logLevel, 'info');
     assert.equal(config.apiRateLimitMax, null);
     assert.equal(config.apiRateLimitWindowMs, DEFAULT_API_RATE_LIMIT_WINDOW_MS);
@@ -38,12 +42,14 @@ describe('loadConfig', () => {
       DB_PATH: '/tmp/xahau.db',
       API_PORT: '4010',
       API_HOST: '127.0.0.1',
+      API_BASE_URL: 'https://index.example.com/',
       LOG_LEVEL: 'debug',
     });
     assert.equal(config.xahaudUrl, 'wss://example.invalid');
     assert.equal(config.dbPath, '/tmp/xahau.db');
     assert.equal(config.apiPort, 4010);
     assert.equal(config.apiHost, '127.0.0.1');
+    assert.equal(config.apiBaseUrl, 'https://index.example.com');
     assert.equal(config.logLevel, 'debug');
   });
 
@@ -53,6 +59,26 @@ describe('loadConfig', () => {
 
   it('rejects an invalid port', () => {
     assert.throws(() => loadConfig({ API_PORT: '0' }), ConfigError);
+  });
+
+  it('rejects an invalid API_BASE_URL', () => {
+    assert.throws(() => loadConfig({ API_BASE_URL: 'not-a-url' }), ConfigError);
+    assert.throws(() => loadConfig({ API_BASE_URL: 'wss://index.example.com' }), ConfigError);
+    assert.throws(() => loadConfig({ API_BASE_URL: 'https://user:pass@index.example.com' }), ConfigError);
+    assert.throws(() => loadConfig({ API_BASE_URL: 'https://index.example.com/?x=1' }), ConfigError);
+  });
+
+  it('rewrites docs localhost URLs to the public origin', () => {
+    const https = 'https://index.example.com';
+    assert.equal(resolveWsBaseUrl(https), 'wss://index.example.com');
+    assert.equal(
+      rewriteDocsBaseUrl('curl -s http://localhost:3000/v1/status', https),
+      'curl -s https://index.example.com/v1/status',
+    );
+    assert.equal(
+      rewriteDocsBaseUrl('npx wscat -c ws://localhost:3000/v1/subscribe', https),
+      'npx wscat -c wss://index.example.com/v1/subscribe',
+    );
   });
 
   it('rejects an invalid log level', () => {

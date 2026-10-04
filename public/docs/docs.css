@@ -158,6 +158,12 @@ h2 {
   line-height: 1.1;
 }
 .lede { color: var(--muted); font-size: 18px; max-width: 720px; }
+.notice {
+  margin: 18px 0 0;
+  max-width: 720px;
+  color: var(--muted);
+  font-size: 13px;
+}
 .donate {
   margin: 18px 0 0;
   color: var(--text);
@@ -321,6 +327,9 @@ footer {
   margin-top: 64px;
   color: var(--muted);
   font-size: 13px;
+}
+footer .notice {
+  margin: 0 0 12px;
 }
 .menu {
   display: none;

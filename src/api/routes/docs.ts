@@ -2,14 +2,15 @@ import { readFileSync } from 'node:fs';
 
 import type { FastifyPluginAsync, FastifyReply, FastifyRequest } from 'fastify';
 
+import { rewriteDocsBaseUrl } from '../../config.js';
 import { renderCookbookMarkdown, renderDocsHtml } from '../docsPage.js';
 import { loadOpenApi, loadOpenApiYaml, resolveAsset } from '../openapi.js';
 
 export const docsRoutes: FastifyPluginAsync = async (app) => {
-  const openapiYaml = loadOpenApiYaml();
   const spec = loadOpenApi();
   const html = renderDocsHtml(spec, app.config);
-  const cookbook = renderCookbookMarkdown(spec);
+  const cookbook = renderCookbookMarkdown(spec, { baseUrl: app.config.apiBaseUrl });
+  const openapiYaml = rewriteDocsBaseUrl(loadOpenApiYaml(), app.config.apiBaseUrl);
   const css = readFileSync(resolveAsset('public/docs/docs.css'), 'utf8');
   const mark = readFileSync(resolveAsset('public/docs/xi.svg'));
   const favicon = readFileSync(resolveAsset('public/docs/favicon.svg'));
