@@ -9,6 +9,7 @@ import type { ClosedLedger, LiveLedgerSource, ValidatedLedger } from './source.j
 export interface LiveLogger extends ApplyLogger {
   info: (obj: Record<string, unknown>, msg: string) => void;
   error: (obj: Record<string, unknown>, msg: string) => void;
+  debug?: (obj: Record<string, unknown>, msg: string) => void;
 }
 
 function nextLedgerToApply(db: SqliteDatabase): number {

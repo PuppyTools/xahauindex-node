@@ -36,6 +36,17 @@ export function hexToUtf8(hex: string): string {
   return Buffer.from(normalized, 'hex').toString('utf8').replace(/\0/g, '');
 }
 
+export function decodeAccountDomain(hex: string | undefined): string | null {
+  if (hex === undefined || hex === '') {
+    return null;
+  }
+  const decoded = hexToUtf8(hex).trim();
+  if (decoded === '' || !/^[\u0020-\u007E]+$/.test(decoded)) {
+    return null;
+  }
+  return decoded;
+}
+
 export function decodeCurrency(code: string): DecodedCurrency {
   if (/^[A-Za-z0-9?]{3}$/.test(code)) {
     return { currency: code.toUpperCase(), currencyHex: null };

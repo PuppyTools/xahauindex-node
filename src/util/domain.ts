@@ -48,9 +48,40 @@ function isPrivateIp(ip: string): boolean {
   return false;
 }
 
+const HOSTNAME_RE =
+  /^(?=.{1,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$/i;
+const HEX_BLOB_RE = /^[0-9a-f]{32,}$/i;
+
+export function tomlHostFromDomain(domain: string): string {
+  return domain.trim().replace(/^https?:\/\//i, '').replace(/\/.*$/, '').replace(/\.$/, '');
+}
+
+export function isFetchableTomlDomain(domain: string): boolean {
+  const host = tomlHostFromDomain(domain).toLowerCase();
+  if (host.length < 4 || host.length > 253 || HEX_BLOB_RE.test(host)) {
+    return false;
+  }
+  return HOSTNAME_RE.test(host);
+}
+
+export function isExpectedTomlFailure(error: unknown): boolean {
+  const name = error instanceof Error ? error.name : '';
+  const message = error instanceof Error ? error.message : String(error);
+  const code =
+    typeof error === 'object' && error !== null && 'code' in error
+      ? String((error as { code: unknown }).code)
+      : '';
+  const cause =
+    error instanceof Error && error.cause instanceof Error ? error.cause.message : '';
+  const text = `${name} ${code} ${message} ${cause}`;
+  return /AbortError|ABORT_ERR|ENOTFOUND|EAI_AGAIN|ECONNREFUSED|ECONNRESET|ETIMEDOUT|cert(ificate)?|altnames|self-signed|unrecognized name|TLS|HTTP 40[134]|HTTP 404|HTTP 410|aborted|timeout/i.test(
+    text,
+  );
+}
+
 export function assertSafeTomlHost(hostname: string): void {
   const host = hostname.trim().toLowerCase();
-  if (host === '' || host === 'localhost' || isPrivateIp(host)) {
+  if (host === '' || host === 'localhost' || isPrivateIp(host) || !isFetchableTomlDomain(host)) {
     throw new Error(`Refusing TOML host ${hostname}`);
   }
 }
@@ -206,7 +237,10 @@ export async function fetchXrpLedgerToml(
   domain: string,
   fetchImpl: typeof fetch = fetch,
 ): Promise<string> {
-  const host = domain.replace(/^https?:\/\//, '').replace(/\/.*$/, '');
+  const host = tomlHostFromDomain(domain);
+  if (!isFetchableTomlDomain(host)) {
+    throw new Error(`Refusing TOML host ${host}`);
+  }
   try {
     const fetched = await fetchPublicHttpsText(`https://${host}/.well-known/xrp-ledger.toml`, {
       maxBytes: TOML_MAX_BYTES,

@@ -150,4 +150,28 @@ describe('TOML verification', () => {
     assert.equal(afterDomain.toml_checked_ledger, null);
     assert.equal(listIssuersDueForToml(db, 1200).length, 1);
   });
+
+  it('skips hex blobs without calling the loader', async () => {
+    const db = memoryDb();
+    upsertIssuer(db, {
+      ...sampleIssuer(),
+      domain: 'ED7573749189112BED42DED36ECFE7BFF43C2D50A6A3F080EF874BE3D5CCDC2B004D59584A000000000000',
+    });
+    let loads = 0;
+    const result = await verifyIssuerToml({
+      db,
+      account: ISSUER,
+      ledger: 50,
+      log: silentLog,
+      loader: async () => {
+        loads += 1;
+        return listedToml();
+      },
+    });
+    assert.equal(result.verified, false);
+    assert.equal(result.error, 'invalid domain');
+    assert.equal(loads, 0);
+    assert.equal(getIssuer(db, ISSUER)?.toml_checked_ledger, 50);
+    assert.equal(getIssuer(db, ISSUER)?.domain_verified, 0);
+  });
 });

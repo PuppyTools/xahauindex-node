@@ -22,6 +22,7 @@ import { normalizeIconUrl } from '../util/icon.js';
 import {
   absDecimal,
   decodeCurrency,
+  decodeAccountDomain,
   hexToUtf8,
   isBlackholed,
   isValidAccount,
@@ -340,9 +341,7 @@ export function applyAccountRoot(
   const domain =
     fields !== undefined && !('Domain' in fields)
       ? (existingIssuer?.domain ?? null)
-      : object.Domain
-        ? hexToUtf8(object.Domain) || null
-        : null;
+      : decodeAccountDomain(object.Domain);
   const flags =
     fields !== undefined && !('Flags' in fields) ? (existingIssuer?.flags ?? null) : (object.Flags ?? null);
   const emailHash =

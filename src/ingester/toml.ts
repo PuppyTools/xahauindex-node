@@ -10,6 +10,8 @@ import type { IssuerRow } from '../types/db.js';
 import {
   fetchXrpLedgerToml,
   isAccountListed,
+  isExpectedTomlFailure,
+  isFetchableTomlDomain,
   parseXrpLedgerToml,
   pickTomlProfile,
 } from '../util/domain.js';
@@ -35,11 +37,28 @@ export async function verifyIssuerToml(options: {
   account: string;
   ledger: number;
   loader?: TomlLoader;
-  log: Pick<LiveLogger, 'warn' | 'info'>;
+  log: Pick<LiveLogger, 'warn' | 'info' | 'debug'>;
 }): Promise<TomlVerifyResult> {
   const issuer = getIssuer(options.db, options.account);
   if (!issuer || issuer.domain === null || issuer.domain === '') {
     return { account: options.account, verified: false, error: 'no domain' };
+  }
+  if (!isFetchableTomlDomain(issuer.domain)) {
+    updateIssuerToml(options.db, {
+      account: issuer.account,
+      domain_verified: 0,
+      toml_name: issuer.toml_name,
+      toml_description: issuer.toml_description,
+      toml_icon_url: issuer.toml_icon_url,
+      toml_raw: issuer.toml_raw,
+      toml_checked_ledger: options.ledger,
+    });
+    syncTokenIssuerFlags(options.db, issuer.account);
+    options.log.debug?.(
+      { account: issuer.account, domain: issuer.domain },
+      'TOML skipped: domain is not a hostname',
+    );
+    return { account: issuer.account, verified: false, error: 'invalid domain' };
   }
   const loader = options.loader ?? defaultLoader;
   try {
@@ -76,10 +95,17 @@ export async function verifyIssuerToml(options: {
     });
     syncTokenIssuerFlags(options.db, issuer.account);
     const message = error instanceof Error ? error.message : String(error);
-    options.log.warn(
-      { err: error, account: issuer.account, domain: issuer.domain },
-      'TOML verification failed',
-    );
+    if (isExpectedTomlFailure(error)) {
+      options.log.debug?.(
+        { account: issuer.account, domain: issuer.domain, err: message },
+        'TOML verification failed',
+      );
+    } else {
+      options.log.warn(
+        { err: error, account: issuer.account, domain: issuer.domain },
+        'TOML verification failed',
+      );
+    }
     return { account: issuer.account, verified: false, error: message };
   }
 }
@@ -88,7 +114,7 @@ export async function runTomlPass(options: {
   db: SqliteDatabase;
   ledger: number;
   loader?: TomlLoader;
-  log: Pick<LiveLogger, 'warn' | 'info'>;
+  log: Pick<LiveLogger, 'warn' | 'info' | 'debug'>;
   interval?: number;
   signal?: AbortSignal;
 }): Promise<TomlVerifyResult[]> {
@@ -106,6 +132,17 @@ export async function runTomlPass(options: {
         log: options.log,
         ...(options.loader === undefined ? {} : { loader: options.loader }),
       }),
+    );
+  }
+  if (due.length > 0) {
+    options.log.info(
+      {
+        due: due.length,
+        verified: results.filter((item) => item.verified).length,
+        skipped: results.filter((item) => item.error === 'invalid domain').length,
+        failed: results.filter((item) => !item.verified && item.error !== 'invalid domain').length,
+      },
+      'toml pass complete',
     );
   }
   return results;

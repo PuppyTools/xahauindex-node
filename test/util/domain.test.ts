@@ -3,6 +3,8 @@ import { describe, it } from 'node:test';
 
 import {
   assertSafeTomlHost,
+  isExpectedTomlFailure,
+  isFetchableTomlDomain,
   isAccountListed,
   parseXrpLedgerToml,
   pickTomlProfile,
@@ -36,5 +38,20 @@ describe('xrp-ledger.toml', () => {
     assert.throws(() => assertSafeTomlHost('127.0.0.1'));
     assert.throws(() => assertSafeTomlHost('10.0.0.2'));
     assert.doesNotThrow(() => assertSafeTomlHost('example.com'));
+  });
+
+  it('only fetches hostname-shaped domains', () => {
+    assert.equal(isFetchableTomlDomain('evernode46.cosecant.info'), true);
+    assert.equal(isFetchableTomlDomain('https://example.com/path'), true);
+    assert.equal(
+      isFetchableTomlDomain(
+        'ED7573749189112BED42DED36ECFE7BFF43C2D50A6A3F080EF874BE3D5CCDC2B004D59584A000000000000',
+      ),
+      false,
+    );
+    assert.equal(isFetchableTomlDomain('not a host'), false);
+    assert.equal(isExpectedTomlFailure(Object.assign(new Error('getaddrinfo ENOTFOUND'), { code: 'ENOTFOUND' })), true);
+    assert.equal(isExpectedTomlFailure(Object.assign(new Error('aborted'), { name: 'AbortError' })), true);
+    assert.equal(isExpectedTomlFailure(new Error('disk full')), false);
   });
 });

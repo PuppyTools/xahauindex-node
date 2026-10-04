@@ -4,6 +4,7 @@ import { describe, it } from 'node:test';
 import {
   absDecimal,
   addDecimal,
+  decodeAccountDomain,
   decodeCurrency,
   dropsToXah,
   hexToUtf8,
@@ -29,6 +30,13 @@ describe('currency helpers', () => {
 
   it('decodes Domain-style hex to UTF-8', () => {
     assert.equal(hexToUtf8(Buffer.from('example.com', 'utf8').toString('hex')), 'example.com');
+    assert.equal(decodeAccountDomain(Buffer.from('example.com', 'utf8').toString('hex')), 'example.com');
+    assert.equal(
+      decodeAccountDomain(
+        'ED7573749189112BED42DED36ECFE7BFF43C2D50A6A3F080EF874BE3D5CCDC2B004D59584A000000000000',
+      ),
+      null,
+    );
   });
 });
 
