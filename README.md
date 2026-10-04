@@ -19,7 +19,7 @@ XahauIndex connects to a xahaud node, snapshots the current ledger, follows it i
 - **DEX prices** — OHLCV (`1h` / `24h` / `7d`) and a trade tape, filterable by time or ledger range
 - **Optional history backfill** — walk closed ledgers back from the snapshot (genesis or a lookback) for trades and URIToken transfers without rewriting current balances
 - **Hook activity** — which accounts have Hooks installed, HookDefinition metadata, decoded HookOn triggers, and catalog labels for known hashes (Evernode governor / registry / heartbeat / reputation)
-- **Real-time WebSocket** — token, URIToken, price, and hook streams
+- **Real-time WebSocket** — indexed `tokens`, `uritokens`, `prices`, and `hooks` streams (same objects as REST, not a xahaud ledger subscribe)
 - **Docker-first** — `docker compose up`
 
 ---
@@ -203,6 +203,9 @@ curl -s 'http://localhost:3000/v1/hooks/definitions?per_page=5'
 ```
 
 ## WebSocket subscribe
+
+Not a xahaud `ledger` / `transactions` subscribe. Those sockets emit raw protocol traffic. This one pushes the same enriched objects as REST (`tokens`, `uritokens`, `prices`, `hooks`) after this node has indexed them.
+
 
 ```bash
 npx wscat -c ws://localhost:3000/v1/subscribe

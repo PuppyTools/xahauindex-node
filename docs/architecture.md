@@ -436,6 +436,8 @@ Price/trade range: `from`, `to` (unix seconds), `from_ledger`, `to_ledger`, `lim
 
 ### WebSocket
 
+`/v1/subscribe` is not xahaud WebSocket `subscribe`. A public or self-hosted xahaud socket (`ledger`, `transactions`, books) is the raw firehose. This endpoint pushes the same enriched objects as REST after ingest — token updates, URIToken lifecycle, DEX trades, hook installs — so a wallet or DEX does not re-index that firehose.
+
 Client:
 
 ```json

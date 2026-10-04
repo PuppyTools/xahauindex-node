@@ -115,6 +115,10 @@ x-cookbook:
     curl: |
       curl -s 'http://localhost:3000/v1/hooks/definitions?per_page=5'
   - title: WebSocket subscribe
+    note: >
+      Not a xahaud `ledger` / `transactions` subscribe. Those sockets emit raw
+      protocol traffic. This one pushes the same enriched objects as REST
+      (`tokens`, `uritokens`, `prices`, `hooks`) after this node has indexed them.
     curl: |
       npx wscat -c ws://localhost:3000/v1/subscribe
       # then send:
@@ -137,7 +141,11 @@ tags:
       install fields plus the shared `HookDefinition`. HookOn bitmasks become
       `triggers`. WASM is not stored. Empty slots are dropped.
   - name: subscribe
-    description: Real-time streams on the same port. No separate WebSocket host.
+    description: >
+      Indexed metadata streams on the same port as REST. This is not xahaud
+      WebSocket `subscribe` (`ledger`, `transactions`, books). Use a public or
+      self-hosted xahaud socket for the raw firehose; use this for live token,
+      URIToken, price, and hook objects already mapped like the REST API.
 
 components:
   parameters:
@@ -1814,12 +1822,18 @@ paths:
     get:
       operationId: subscribe
       tags: [subscribe]
-      summary: Real-time token, URIToken, price, and hook streams
+      summary: Indexed token, URIToken, price, and hook streams
       description: >
-        One connection, multiple streams. The API listens on the same port — no
-        separate WS host. `unsubscribe` uses the same shape. Unknown commands and
-        invalid JSON return the standard `error` object. When the operator cap is
-        on, extra sockets from the same IP are rejected with `RATE_LIMITED`.
+        Not a stand-in for `wss://xahau.network` or your own xahaud WebSocket.
+        xahaud `subscribe` emits raw ledgers, transactions, and books. This
+        endpoint emits the objects this node has already indexed — the same
+        shapes as `GET /v1/tokens`, `/v1/uritokens`, `/v1/trades`, and
+        `/v1/hooks`, including remarks, issuer fields, and decoded HookOn.
+        Streams are `tokens`, `uritokens`, `prices`, and `hooks`. One
+        connection, multiple streams, same HTTP port (no separate WS host).
+        `unsubscribe` uses the same shape. Unknown commands and invalid JSON
+        return the standard `error` object. When the operator cap is on, extra
+        sockets from the same IP are rejected with `RATE_LIMITED`.
       x-websocket: true
       x-messages:
         - title: Subscribe
