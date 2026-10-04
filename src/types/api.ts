@@ -110,10 +110,13 @@ export interface TrustLine {
   remarks?: RemarksMap;
 }
 
+export type UriKind = 'https' | 'ipfs' | 'image' | 'onchain' | 'empty';
+
 export interface URIToken {
   id: string;
   uri: string | null;
   uri_raw: string;
+  uri_kind: UriKind;
   digest: string | null;
   issuer: string;
   owner: string;

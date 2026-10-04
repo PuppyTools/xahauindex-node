@@ -103,6 +103,8 @@ Optional. After snapshot, if `BACKFILL_FROM_LEDGER` (alias `FULL_HISTORY_START`;
 
 `Amount` + `Destination` on the object are the active sell offer. Burned tokens stay in the table with `burned=1` (live only; snapshot cannot see already-burned tokens).
 
+The URI field is a 256-byte on-ledger blob. It may be an `https` / `ipfs` link, or packed application data (Evernode lease tokens start as hex that decodes to base64 `evrleaseLTV…`). The API sets `uri_kind` and fills `metadata` from fetched HTTPS JSON when the URI is a document URL. If the URI is not a URL, `metadata` is decoded at read time (`source: onchain`) so existing tokens are viewable without a refetch. Remarks remain a separate `SetRemarks` map.
+
 ### Remarks
 
 Shared decoder. Hex name/value → UTF-8. JSON values stored as TEXT. Missing value deletes the key. `Flags & 1` = immutable.

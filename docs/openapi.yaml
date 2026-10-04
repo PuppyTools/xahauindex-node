@@ -285,6 +285,10 @@ components:
           nullable: true
         uri_raw:
           type: string
+        uri_kind:
+          type: string
+          enum: [https, ipfs, image, onchain, empty]
+          description: How the URI is interpreted. `onchain` means the 256-byte URI is packed data, not a URL.
         digest:
           type: string
           nullable: true
@@ -328,7 +332,10 @@ components:
           description: On-ledger or URI-metadata image link. The indexer stores the URL only and never caches image bytes.
         metadata:
           nullable: true
-          description: JSON document fetched from the URIToken URI when that URI is metadata, not an image
+          description: >
+            Fetched HTTPS JSON when the URI is a document URL. When the URI is
+            packed on-chain data (Evernode `evrlease`, printable text, or raw
+            bytes), this is a decoded object with `source: onchain` instead.
         remarks:
           $ref: '#/components/schemas/Remarks'
         transfer_count:

@@ -470,7 +470,7 @@
                 <tr><td><code>sort</code></td><td><span class="pill opt">query</span></td><td><code>mint_ledger</code> · <code>last_updated</code></td></tr>
               </tbody>
             </table>
-            <p class="sub" style="margin-top:14px"><code>icon_url</code> is a link only. <code>metadata</code> is the JSON document when the on-ledger URI is HTTPS JSON (not an image).</p>
+            <p class="sub" style="margin-top:14px"><code>icon_url</code> is a link only. <code>metadata</code> is fetched HTTPS JSON when the URI is a document URL. If the URI is packed on-chain data (not a URL), <code>metadata</code> is a decoded object with <code>source: "onchain"</code> — Evernode leases include <code>lease_index</code> and <code>lease_amount</code>. <code>uri_kind</code> is <code>https</code>, <code>ipfs</code>, <code>image</code>, <code>onchain</code>, or <code>empty</code>.</p>
           </div>
         </article>
         <article class="endpoint">
@@ -629,8 +629,9 @@
             <tbody>
               <tr><td><code>id</code></td><td>URITokenID</td></tr>
               <tr><td><code>uri</code> / <code>uri_raw</code></td><td>Decoded URI and original hex</td></tr>
+              <tr><td><code>uri_kind</code></td><td><code>https</code>, <code>ipfs</code>, <code>image</code>, <code>onchain</code>, or <code>empty</code></td></tr>
               <tr><td><code>sell_offer</code></td><td>Drops string or IOU <code>{ value, currency, issuer }</code></td></tr>
-              <tr><td><code>metadata</code></td><td>Fetched JSON document, or null</td></tr>
+              <tr><td><code>metadata</code></td><td>Fetched HTTPS JSON, or decoded on-chain URI data</td></tr>
               <tr><td><code>transfers[]</code></td><td>On detail: from, to, price, ledger, tx hash</td></tr>
             </tbody>
           </table>

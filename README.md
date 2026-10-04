@@ -15,7 +15,7 @@ XahauIndex connects to a xahaud node, snapshots the current ledger, follows it i
 - **URITokens** — Xahau native NFTs; mint / sell / transfer / burn plus Remarks
 - **Issuer profiles** — domain verification via `/.well-known/xahau.toml`, blackhole detection, AccountRoot remarks
 - **Icon URLs** — remarks, TOML, and URI metadata JSON store `https` / `ipfs` links only. No image cache or CDN.
-- **URIToken metadata** — if the on-ledger URI is HTTPS JSON, that document is stored on the token (`metadata`) besides the icon link.
+- **URIToken metadata** — HTTPS JSON URIs are fetched and stored. Packed on-chain URIs (Evernode `evrlease`, text, bytes) are decoded into `metadata` at read time so the token is still viewable.
 - **DEX prices** — OHLCV (`1h` / `24h` / `7d`) and a trade tape, filterable by time or ledger range
 - **Optional history backfill** — walk closed ledgers back from the snapshot (genesis or a lookback) for trades and URIToken transfers without rewriting current balances
 - **Hook activity** — which accounts have Hooks installed and which hashes
