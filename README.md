@@ -77,8 +77,9 @@ Historical backfill is **off** unless you set one of:
 | `BACKFILL_LOOKBACK` | Walk `LOOKBACK` ledgers back from the snapshot when `FROM` is unset. |
 | `BACKFILL_XAHAUD_URL` | Dedicated full-history node for backfill only (`ws`/`wss` or `http`/`https` JSON-RPC). Live subscribe still uses `XAHAUD_URL`. |
 | `BACKFILL_ENV` | Optional second env file. `XAHAUD_URL` or `BACKFILL_XAHAUD_URL` in that file is the history node. Defaults to `.env.backfill` when that file exists. |
+| `BACKFILL_MIN_INTERVAL_MS` | Delay between historical fetches. Unset = `400` when sharing `XAHAUD_URL`, `0` on a dedicated history node. |
 
-If both stop bounds are set, `BACKFILL_FROM_LEDGER` wins. The walk starts at the snapshot ledger and decrements until that bound — `genesis` means keep going backward until ledger 1. Resume is the next lower ledger (`backfill_next`). Use a full-history node for backfill when the subscription node does not keep old ledgers. Public nodes that still cannot serve an index are retried, then skipped. The snapshot remains the source of current balances, owners, issuers, and Hooks. Backfill records DEX trades and URIToken transfers only.
+If both stop bounds are set, `BACKFILL_FROM_LEDGER` wins. The walk starts at the snapshot ledger and decrements until that bound — `genesis` means keep going backward until ledger 1. Resume is the next lower ledger (`backfill_next`). Use a full-history node for backfill when the subscription node does not keep old ledgers. Sharing the public RPC with live subscribe is paced so a genesis walk cannot exhaust the 10s quota and drop the live stream. `tooBusy` / rate-limit responses wait for the hinted retry, then continue — they do not skip a ledger or stop the process. Public nodes that still cannot serve an index are retried, then skipped. The snapshot remains the source of current balances, owners, issuers, and Hooks. Backfill records DEX trades and URIToken transfers only.
 
 ---
 

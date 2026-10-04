@@ -81,6 +81,7 @@ Optional. After snapshot, if `BACKFILL_FROM_LEDGER` (alias `FULL_HISTORY_START`;
 - Missing tokens get a full apply, then a burn when the node is a `DeletedNode`.
 - RippleState, AccountRoot, SetRemarks, and SetHook are not applied.
 - Public nodes that cannot serve an old ledger: retry, then skip and persist `backfill_next`.
+- Sharing the live websocket paces fetches (`BACKFILL_MIN_INTERVAL_MS`, default 400ms) so a genesis walk cannot exhaust public `tooBusy` quotas. Rate-limit errors wait for the hinted retry and never skip a ledger or tear down live subscribe.
 - Optional dedicated history node (`BACKFILL_XAHAUD_URL`, or `XAHAUD_URL` inside `BACKFILL_ENV` / `.env.backfill`) so live subscribe can stay on a short-history websocket. `http`/`https` uses JSON-RPC `ledger`; `ws`/`wss` uses the same client as live.
 - Runs in parallel with live follow. Historical rows below `L` do not move `MAX(ledgers)` past the snapshot.
 

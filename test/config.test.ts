@@ -4,7 +4,14 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, it } from 'node:test';
 
-import { ConfigError, loadConfig, resolveBackfillFrom, resolveBackfillSourceUrl } from '../src/config.js';
+import {
+  ConfigError,
+  loadConfig,
+  resolveBackfillFrom,
+  resolveBackfillMinIntervalMs,
+  resolveBackfillSourceUrl,
+  SHARED_BACKFILL_INTERVAL_MS,
+} from '../src/config.js';
 
 describe('loadConfig', () => {
   it('uses mainnet defaults', () => {
@@ -86,6 +93,17 @@ describe('loadConfig', () => {
     const fallback = loadConfig({});
     assert.equal(fallback.backfillXahaudUrl, null);
     assert.equal(resolveBackfillSourceUrl(fallback), 'wss://xahau.network');
+    assert.equal(fallback.backfillMinIntervalMs, null);
+    assert.equal(resolveBackfillMinIntervalMs(fallback, false), SHARED_BACKFILL_INTERVAL_MS);
+    assert.equal(resolveBackfillMinIntervalMs(fallback, true), 0);
+  });
+
+  it('reads BACKFILL_MIN_INTERVAL_MS including zero', () => {
+    const paced = loadConfig({ BACKFILL_MIN_INTERVAL_MS: '250' });
+    assert.equal(paced.backfillMinIntervalMs, 250);
+    assert.equal(resolveBackfillMinIntervalMs(paced, true), 250);
+    const off = loadConfig({ BACKFILL_MIN_INTERVAL_MS: '0' });
+    assert.equal(resolveBackfillMinIntervalMs(off, false), 0);
   });
 
   it('reads the backfill node from a second env file', () => {

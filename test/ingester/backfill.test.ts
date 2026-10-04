@@ -424,6 +424,34 @@ describe('runBackfill', () => {
     assert.equal(getIndexerState(db, 'backfill_next'), '8');
   });
 
+  it('retries a rate-limited ledger instead of skipping it', async () => {
+    const db = memoryDb();
+    seedSnapshot(db, 5);
+    let hits = 0;
+    const result = await runBackfill({
+      db,
+      config: testConfig({ backfillFromLedger: 5 }),
+      log: silentLog,
+      fetchAttempts: 1,
+      retryMinMs: 1,
+      source: {
+        getLedgerWithTransactions: async (index) => {
+          if (index === 5) {
+            hits += 1;
+            if (hits < 3) {
+              throw new Error('rate limit: units quota (50000 per 10s) exhausted, retry in ~1ms');
+            }
+          }
+          return closedLedger(index, []);
+        },
+      },
+    });
+    assert.equal(result.skipped, false);
+    assert.equal(result.applied, 1);
+    assert.equal(result.skippedLedgers, 0);
+    assert.equal(hits, 3);
+  });
+
   it('logs backward progress with remaining ledgers', async () => {
     const db = memoryDb();
     seedSnapshot(db, 5);

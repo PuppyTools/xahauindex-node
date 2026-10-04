@@ -28,6 +28,7 @@ export async function catchUpLedgers(options: {
   through: number;
   signal?: AbortSignal;
   onApplied?: (result: ApplyClosedLedgerResult) => void;
+  retryMinMs?: number;
 }): Promise<ApplyClosedLedgerResult[]> {
   const { db, source, log, through } = options;
   const applied: ApplyClosedLedgerResult[] = [];
@@ -37,9 +38,14 @@ export async function catchUpLedgers(options: {
       throw options.signal.reason ?? new Error('aborted');
     }
     const ledger: ClosedLedger = await retry(() => source.getLedgerWithTransactions(index), {
-      minMs: 1_000,
+      minMs: options.retryMinMs ?? 1_000,
       maxMs: 60_000,
       ...(options.signal === undefined ? {} : { signal: options.signal }),
+      onRetry: ({ error, waitMs, rateLimited }) => {
+        if (rateLimited) {
+          log.warn({ err: error, ledger: index, waitMs }, 'live ledger fetch rate-limited, waiting');
+        }
+      },
     });
     const result = applyClosedLedger(db, ledger, log);
     applied.push(result);
@@ -82,9 +88,21 @@ export async function followLive(options: {
   log: LiveLogger;
   signal?: AbortSignal;
   onApplied?: (result: ApplyClosedLedgerResult) => void;
+  retryMinMs?: number;
 }): Promise<void> {
   const { db, source, runtime, log } = options;
-  const tip = await source.getValidatedLedger();
+  const retryMinMs = options.retryMinMs ?? 1_000;
+  const tip = await retry(() => source.getValidatedLedger(), {
+    minMs: retryMinMs,
+    maxMs: 60_000,
+    ...(options.signal === undefined ? {} : { signal: options.signal }),
+    onRetry: ({ error, waitMs, rateLimited }) => {
+      log.warn(
+        { err: error, waitMs, rateLimited },
+        rateLimited ? 'live tip fetch rate-limited, waiting' : 'live tip fetch retrying',
+      );
+    },
+  });
   runtime.networkLedgerIndex = tip.index;
   const appliedOpts = {
     db,
@@ -92,13 +110,24 @@ export async function followLive(options: {
     log,
     ...(options.signal === undefined ? {} : { signal: options.signal }),
     ...(options.onApplied === undefined ? {} : { onApplied: options.onApplied }),
+    retryMinMs,
   };
   await catchUpLedgers({
     ...appliedOpts,
     through: tip.index,
   });
 
-  await source.subscribeLedgers();
+  await retry(() => source.subscribeLedgers(), {
+    minMs: retryMinMs,
+    maxMs: 60_000,
+    ...(options.signal === undefined ? {} : { signal: options.signal }),
+    onRetry: ({ error, waitMs, rateLimited }) => {
+      log.warn(
+        { err: error, waitMs, rateLimited },
+        rateLimited ? 'live subscribe rate-limited, waiting' : 'live subscribe retrying',
+      );
+    },
+  });
   const queue = new SerialQueue();
 
   const handleClosed = (closed: ValidatedLedger): void => {

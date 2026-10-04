@@ -138,6 +138,7 @@ Copy `.env.example` to `.env`. Never commit `.env`.
 - `BACKFILL_LOOKBACK` — if `FROM` is unset, stop at `snapshot - lookback + 1`. Neither set = no backfill. Walk is snapshot → FROM.
 - `BACKFILL_XAHAUD_URL` — optional dedicated history node (`ws`/`wss` or `http`/`https` JSON-RPC). Unset = reuse `XAHAUD_URL`.
 - `BACKFILL_ENV` — optional second env file for that node URL. Auto-loads `.env.backfill` when present.
+- `BACKFILL_MIN_INTERVAL_MS` — delay between historical fetches. Unset = `400` when sharing the live node (public RPC quotas), `0` on a dedicated history URL.
 
 ## Running locally
 

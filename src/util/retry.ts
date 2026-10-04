@@ -1,9 +1,12 @@
+import { isRateLimited, rateLimitWaitMs } from './rateLimit.js';
+
 export interface RetryOptions {
   minMs?: number;
   maxMs?: number;
   factor?: number;
   attempts?: number;
   signal?: AbortSignal;
+  onRetry?: (info: { error: unknown; waitMs: number; rateLimited: boolean }) => void;
 }
 
 export function sleep(ms: number, signal?: AbortSignal): Promise<void> {
@@ -39,10 +42,17 @@ export async function retry<T>(fn: () => Promise<T>, options: RetryOptions = {})
       return await fn();
     } catch (error) {
       lastError = error;
+      if (isRateLimited(error)) {
+        const waitMs = rateLimitWaitMs(error, delay);
+        options.onRetry?.({ error, waitMs, rateLimited: true });
+        await sleep(waitMs, options.signal);
+        continue;
+      }
       tried += 1;
       if (tried >= attempts) {
         break;
       }
+      options.onRetry?.({ error, waitMs: delay, rateLimited: false });
       await sleep(delay, options.signal);
       delay = Math.min(maxMs, delay * factor);
     }

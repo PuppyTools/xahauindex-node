@@ -1,7 +1,7 @@
 import { resolveBackfillFrom, type Config } from '../config.js';
 import type { SqliteDatabase } from '../db/client.js';
 import { getIndexerState, setIndexerState } from '../db/queries/indexer.js';
-import { retry } from '../util/retry.js';
+import { retry, sleep } from '../util/retry.js';
 import { applyHistoricalLedger } from './ledger.js';
 import type { LiveLogger } from './live.js';
 import type { ClosedLedger, LiveLedgerSource } from './source.js';
@@ -90,6 +90,7 @@ export async function runBackfill(options: {
   signal?: AbortSignal;
   fetchAttempts?: number;
   retryMinMs?: number;
+  minIntervalMs?: number;
 }): Promise<BackfillResult> {
   const { db, source, config, log } = options;
   const empty: BackfillResult = {
@@ -134,12 +135,21 @@ export async function runBackfill(options: {
   setIndexerState(db, 'backfill_direction', BACKFILL_DIRECTION);
   setIndexerState(db, 'backfill_next', String(index));
   setIndexerState(db, 'backfill_status', 'running');
-  log.info(backfillProgress(from, through, index), 'historical backfill starting (snapshot → FROM)');
+  const minIntervalMs = options.minIntervalMs ?? 0;
+  log.info(
+    { ...backfillProgress(from, through, index), minIntervalMs },
+    'historical backfill starting (snapshot → FROM)',
+  );
 
   let applied = 0;
   let skippedLedgers = 0;
   const shouldLogProgress = (next: number, force: boolean): boolean =>
     force || next < from || next % 100 === 0;
+  const pace = async (): Promise<void> => {
+    if (minIntervalMs > 0) {
+      await sleep(minIntervalMs, options.signal);
+    }
+  };
   while (index >= from) {
     if (options.signal?.aborted) {
       throw options.signal.reason ?? new Error('aborted');
@@ -151,6 +161,11 @@ export async function runBackfill(options: {
         maxMs: 30_000,
         attempts: options.fetchAttempts ?? 6,
         ...(options.signal === undefined ? {} : { signal: options.signal }),
+        onRetry: ({ error, waitMs, rateLimited }) => {
+          if (rateLimited) {
+            log.warn({ err: error, ledger: index, waitMs }, 'historical backfill rate-limited, waiting');
+          }
+        },
       });
     } catch (error) {
       if (options.signal?.aborted) {
@@ -166,6 +181,7 @@ export async function runBackfill(options: {
           'historical backfill progress',
         );
       }
+      await pace();
       continue;
     }
 
@@ -186,6 +202,7 @@ export async function runBackfill(options: {
         'historical backfill progress',
       );
     }
+    await pace();
   }
 
   setIndexerState(db, 'backfill_status', 'complete');

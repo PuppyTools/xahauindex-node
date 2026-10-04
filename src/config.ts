@@ -24,6 +24,11 @@ export interface Config {
   backfillXahaudUrl: string | null;
   /** Second env file that supplied the backfill node URL, if any. */
   backfillEnvPath: string | null;
+  /**
+   * Minimum delay between historical ledger fetches. `null` = 400ms when sharing
+   * the live node, 0 when using a dedicated backfill URL.
+   */
+  backfillMinIntervalMs: number | null;
 }
 
 export class ConfigError extends Error {
@@ -135,6 +140,20 @@ function readBackfillNode(env: NodeJS.ProcessEnv): {
   };
 }
 
+function readOptionalNonNegativeInt(env: NodeJS.ProcessEnv, key: string): number | null {
+  const raw = env[key];
+  if (raw === undefined || raw.trim() === '') {
+    return null;
+  }
+  const value = Number.parseInt(raw.trim(), 10);
+  if (!Number.isInteger(value) || value < 0) {
+    throw new ConfigError(`${key} must be an integer >= 0`);
+  }
+  return value;
+}
+
+export const SHARED_BACKFILL_INTERVAL_MS = 400;
+
 function readOptionalPositiveInt(env: NodeJS.ProcessEnv, key: string): number | null {
   const raw = env[key];
   if (raw === undefined || raw.trim() === '') {
@@ -180,6 +199,13 @@ export function resolveBackfillSourceUrl(config: Config): string {
   return config.backfillXahaudUrl ?? config.xahaudUrl;
 }
 
+export function resolveBackfillMinIntervalMs(config: Config, dedicatedNode: boolean): number {
+  if (config.backfillMinIntervalMs !== null) {
+    return config.backfillMinIntervalMs;
+  }
+  return dedicatedNode ? 0 : SHARED_BACKFILL_INTERVAL_MS;
+}
+
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
   const backfillNode = readBackfillNode(env);
   return {
@@ -192,6 +218,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     backfillLookback: readOptionalPositiveInt(env, 'BACKFILL_LOOKBACK'),
     backfillXahaudUrl: backfillNode.backfillXahaudUrl,
     backfillEnvPath: backfillNode.backfillEnvPath,
+    backfillMinIntervalMs: readOptionalNonNegativeInt(env, 'BACKFILL_MIN_INTERVAL_MS'),
   };
 }
 

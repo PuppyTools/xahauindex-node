@@ -13,6 +13,7 @@ export function testConfig(overrides: Partial<Config> = {}): Config {
     backfillLookback: null,
     backfillXahaudUrl: null,
     backfillEnvPath: null,
+    backfillMinIntervalMs: 0,
     ...overrides,
   };
 }
