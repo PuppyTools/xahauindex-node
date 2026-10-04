@@ -4,12 +4,19 @@ import { sleep } from './retry.js';
 export type QuotaLane = 'live' | 'backfill';
 
 export const BACKFILL_QUOTA_PAUSE_MS = 15_000;
+export const BACKFILL_WAIT_LOG_MS = 30_000;
+
+export type QuotaWaitInfo = {
+  reason: 'cooldown' | 'live' | 'pause';
+  waitMs: number;
+};
 
 export class NodeQuota {
   private coolUntil = 0;
   private backfillPauseUntil = 0;
   private liveDepth = 0;
   private locked = false;
+  private lastWaitNotify = 0;
   private readonly waiters: Array<() => void> = [];
 
   constructor(private readonly backfillPauseExtraMs = BACKFILL_QUOTA_PAUSE_MS) {}
@@ -37,7 +44,27 @@ export class NodeQuota {
     this.liveDepth = Math.max(0, this.liveDepth - 1);
   }
 
-  async waitReady(lane: QuotaLane, signal?: AbortSignal): Promise<void> {
+  backfillBlock(): QuotaWaitInfo | null {
+    const now = Date.now();
+    const cool = this.coolUntil - now;
+    if (cool > 0) {
+      return { reason: 'cooldown', waitMs: cool };
+    }
+    const pause = this.backfillPauseUntil - now;
+    if (pause > 0) {
+      return { reason: 'pause', waitMs: pause };
+    }
+    if (this.liveDepth > 0) {
+      return { reason: 'live', waitMs: 0 };
+    }
+    return null;
+  }
+
+  async waitReady(
+    lane: QuotaLane,
+    signal?: AbortSignal,
+    onWait?: (info: QuotaWaitInfo) => void,
+  ): Promise<void> {
     for (;;) {
       if (signal?.aborted) {
         throw signal.reason ?? new Error('aborted');
@@ -45,12 +72,17 @@ export class NodeQuota {
       const now = Date.now();
       const cool = this.coolUntil - now;
       if (cool > 0) {
+        this.notifyWait(onWait, { reason: 'cooldown', waitMs: cool });
         await sleep(cool, signal);
         continue;
       }
       if (lane === 'backfill') {
         const pause = this.backfillPauseUntil - Date.now();
         if (this.liveDepth > 0 || pause > 0) {
+          this.notifyWait(onWait, {
+            reason: this.liveDepth > 0 ? 'live' : 'pause',
+            waitMs: Math.max(0, pause),
+          });
           await sleep(Math.max(20, pause), signal);
           continue;
         }
@@ -59,11 +91,16 @@ export class NodeQuota {
     }
   }
 
-  async run<T>(lane: QuotaLane, fn: () => Promise<T>, signal?: AbortSignal): Promise<T> {
-    await this.waitReady(lane, signal);
+  async run<T>(
+    lane: QuotaLane,
+    fn: () => Promise<T>,
+    signal?: AbortSignal,
+    onWait?: (info: QuotaWaitInfo) => void,
+  ): Promise<T> {
+    await this.waitReady(lane, signal, onWait);
     const release = await this.lock(signal);
     try {
-      await this.waitReady(lane, signal);
+      await this.waitReady(lane, signal, onWait);
       return await fn();
     } catch (error) {
       if (isRateLimited(error)) {
@@ -105,6 +142,18 @@ export class NodeQuota {
       next?.();
     };
   }
+
+  private notifyWait(onWait: ((info: QuotaWaitInfo) => void) | undefined, info: QuotaWaitInfo): void {
+    if (onWait === undefined) {
+      return;
+    }
+    const now = Date.now();
+    if (now - this.lastWaitNotify < BACKFILL_WAIT_LOG_MS) {
+      return;
+    }
+    this.lastWaitNotify = now;
+    onWait(info);
+  }
 }
 
 export async function withQuota<T>(
@@ -112,9 +161,10 @@ export async function withQuota<T>(
   lane: QuotaLane,
   fn: () => Promise<T>,
   signal?: AbortSignal,
+  onWait?: (info: QuotaWaitInfo) => void,
 ): Promise<T> {
   if (quota === undefined) {
     return fn();
   }
-  return quota.run(lane, fn, signal);
+  return quota.run(lane, fn, signal, onWait);
 }

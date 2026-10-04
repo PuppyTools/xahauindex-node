@@ -164,6 +164,12 @@ export async function runBackfill(options: {
             'backfill',
             () => source.getLedgerWithTransactions(index),
             options.signal,
+            ({ reason, waitMs }) => {
+              log.info(
+                { ...backfillProgress(from, through, index), reason, waitMs },
+                'historical backfill paused for live quota',
+              );
+            },
           ),
         {
           minMs: options.retryMinMs ?? 1_000,

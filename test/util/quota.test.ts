@@ -5,6 +5,16 @@ import { NodeQuota } from '../../src/util/quota.js';
 import { sleep } from '../../src/util/retry.js';
 
 describe('NodeQuota', () => {
+  it('reports why backfill is blocked', () => {
+    const quota = new NodeQuota(1);
+    assert.equal(quota.backfillBlock(), null);
+    quota.beginLive();
+    assert.equal(quota.backfillBlock()?.reason, 'live');
+    quota.endLive();
+    quota.coolDown(50, { pauseBackfillMs: 80 });
+    assert.equal(quota.backfillBlock()?.reason, 'cooldown');
+  });
+
   it('holds backfill while live is catching up', async () => {
     const quota = new NodeQuota(1);
     const order: string[] = [];
