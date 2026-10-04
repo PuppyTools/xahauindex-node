@@ -435,7 +435,7 @@ export function renderDocsHtml(spec: OpenApiSpec, config?: Config): string {
       <div class="node-meta">
         <div>
           <div class="meta-label">Status</div>
-          <div class="status"><span class="dot" id="dot"></span><span id="status">Checking this node…</span></div>
+          <div class="status"><span class="dot" id="dot"></span><span id="node-status">Checking this node…</span></div>
         </div>
         <div>
           <div class="meta-label">Data Range</div>
@@ -497,7 +497,7 @@ export function renderDocsHtml(spec: OpenApiSpec, config?: Config): string {
     </main>
   </div>
   <script>
-    const statusEl = document.getElementById('status');
+    const statusEl = document.getElementById('node-status');
     const rangeEl = document.getElementById('range');
     const dot = document.getElementById('dot');
     const ledgerLabel = (value) => Number(value).toLocaleString('en-US');
