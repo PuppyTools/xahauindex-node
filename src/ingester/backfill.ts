@@ -8,6 +8,8 @@ import type { ClosedLedger, LiveLedgerSource } from './source.js';
 
 export type BackfillRunStatus = 'idle' | 'running' | 'complete';
 
+export const BACKFILL_DIRECTION = 'backward';
+
 export interface BackfillResult {
   skipped: boolean;
   from: number | null;
@@ -34,14 +36,34 @@ function snapshotLedger(db: SqliteDatabase): number | null {
   return ledger !== null && ledger >= 1 ? ledger : null;
 }
 
-function nextIndex(from: number, storedFrom: number | null, storedNext: number | null): number {
-  if (storedFrom !== null && from < storedFrom) {
-    return from;
-  }
-  if (storedNext !== null && storedNext >= from) {
+/**
+ * Next ledger to fetch while walking snapshot → FROM.
+ * Forward-era progress (no `backfill_direction`) restarts at the snapshot so
+ * recent history is filled first. A completed narrower range continues downward
+ * from the previous `FROM` without re-walking the high end.
+ */
+export function resumeBackfillIndex(options: {
+  from: number;
+  through: number;
+  storedFrom: number | null;
+  storedNext: number | null;
+  storedStatus: string | undefined;
+  storedDirection: string | undefined;
+}): number {
+  const { from, through, storedFrom, storedNext, storedStatus, storedDirection } = options;
+  if (storedDirection === BACKFILL_DIRECTION) {
+    if (storedNext === null) {
+      return through;
+    }
+    if (storedNext > through) {
+      return through;
+    }
     return storedNext;
   }
-  return from;
+  if (storedStatus === 'complete' && storedFrom !== null && storedFrom > from) {
+    return storedFrom - 1;
+  }
+  return through;
 }
 
 export async function runBackfill(options: {
@@ -73,6 +95,7 @@ export async function runBackfill(options: {
   const storedFrom = parseStateInt(db, 'backfill_from');
   const storedNext = parseStateInt(db, 'backfill_next');
   const storedStatus = getIndexerState(db, 'backfill_status');
+  const storedDirection = getIndexerState(db, 'backfill_direction');
   if (
     storedStatus === 'complete' &&
     storedFrom !== null &&
@@ -82,16 +105,24 @@ export async function runBackfill(options: {
     return { skipped: true, from: storedFrom, through, applied: 0, skippedLedgers: 0 };
   }
 
-  let index = nextIndex(from, storedFrom, storedNext);
+  let index = resumeBackfillIndex({
+    from,
+    through,
+    storedFrom,
+    storedNext,
+    storedStatus,
+    storedDirection,
+  });
   setIndexerState(db, 'backfill_from', String(from));
   setIndexerState(db, 'backfill_through', String(through));
+  setIndexerState(db, 'backfill_direction', BACKFILL_DIRECTION);
   setIndexerState(db, 'backfill_next', String(index));
   setIndexerState(db, 'backfill_status', 'running');
-  log.info({ from, through, next: index }, 'historical backfill starting');
+  log.info({ from, through, next: index, direction: BACKFILL_DIRECTION }, 'historical backfill starting');
 
   let applied = 0;
   let skippedLedgers = 0;
-  while (index <= through) {
+  while (index >= from) {
     if (options.signal?.aborted) {
       throw options.signal.reason ?? new Error('aborted');
     }
@@ -109,19 +140,19 @@ export async function runBackfill(options: {
       }
       log.warn({ err: error, ledger: index }, 'historical ledger unavailable, skipping');
       skippedLedgers += 1;
-      index += 1;
+      index -= 1;
       setIndexerState(db, 'backfill_next', String(index));
       continue;
     }
 
     const result = applyHistoricalLedger(db, ledger, log);
     applied += result.applied ? 1 : 0;
-    setIndexerState(db, 'backfill_ledger', String(index));
-    index += 1;
+    setIndexerState(db, 'backfill_ledger', String(result.index));
+    index -= 1;
     setIndexerState(db, 'backfill_next', String(index));
-    if (applied === 1 || index > through || index % 100 === 0) {
+    if (applied === 1 || index < from || index % 100 === 0) {
       log.info(
-        { ledger: result.index, next: index, through, txApplied: result.txApplied, trades: result.trades.length },
+        { ledger: result.index, next: index, from, through, txApplied: result.txApplied, trades: result.trades.length },
         'historical ledger applied',
       );
     }

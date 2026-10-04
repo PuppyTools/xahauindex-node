@@ -13,9 +13,9 @@ export interface Config {
   apiPort: number;
   apiHost: string;
   logLevel: LogLevel;
-  /** Absolute ledger to start historical backfill, or null to skip. `1` is genesis. */
+  /** Earliest ledger the historical walk stops at, or null to skip. `1` is genesis. */
   backfillFromLedger: number | null;
-  /** If `backfillFromLedger` is unset, start at `snapshot - lookback + 1`. */
+  /** If `backfillFromLedger` is unset, stop at `snapshot - lookback + 1`. */
   backfillLookback: number | null;
   /**
    * Dedicated history node for backfill (`ws`/`wss` or `http`/`https` JSON-RPC).

@@ -151,7 +151,7 @@ components:
           description: Ledger index at time of response
         history_start_ledger:
           type: integer
-          description: Earliest ledger this node has price/transfer history for (backfill_from, else live_from_ledger)
+          description: Earliest ledger this node has price/transfer history for (backfill frontier while running, backfill_from when complete, else live_from_ledger)
 
     Error:
       type: object
@@ -565,18 +565,18 @@ components:
         history_start_ledger:
           type: integer
           nullable: true
-          description: Earliest ledger with collected history (backfill_from when configured, else live_from_ledger)
+          description: Earliest ledger with collected history (backfill frontier while walking down, backfill_from when complete, else live_from_ledger)
         backfill_status:
           type: string
           enum: [idle, running, complete]
         backfill_from:
           type: integer
           nullable: true
-          description: First ledger the historical backfill will walk
+          description: Earliest ledger the historical backfill walks down to
         backfill_ledger:
           type: integer
           nullable: true
-          description: Last historical ledger successfully applied
+          description: Lowest historical ledger successfully applied so far (walks snapshot → FROM)
         ledger_index:
           type: integer
         network_ledger_index:

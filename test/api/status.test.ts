@@ -76,7 +76,7 @@ describe('GET /v1/status', () => {
     await app.close();
   });
 
-  it('reports backfill progress and uses it as history_start_ledger', async () => {
+  it('reports the backfill frontier as history_start_ledger while walking down', async () => {
     const db = openDatabase(':memory:');
     dbs.push(db);
     setIndexerState(db, 'snapshot_status', 'complete');
@@ -98,10 +98,30 @@ describe('GET /v1/status', () => {
     const body = response.json() as { data: Status };
     assert.equal(response.statusCode, 200);
     assert.equal(body.data.status, 'live');
-    assert.equal(body.data.history_start_ledger, 40);
+    assert.equal(body.data.history_start_ledger, 55);
     assert.equal(body.data.backfill_status, 'running');
     assert.equal(body.data.backfill_from, 40);
     assert.equal(body.data.backfill_ledger, 55);
+    await app.close();
+  });
+
+  it('uses backfill_from as history_start_ledger after the walk completes', async () => {
+    const db = openDatabase(':memory:');
+    dbs.push(db);
+    setIndexerState(db, 'snapshot_status', 'complete');
+    setIndexerState(db, 'snapshot_ledger', '100');
+    setIndexerState(db, 'live_from_ledger', '101');
+    setIndexerState(db, 'backfill_status', 'complete');
+    setIndexerState(db, 'backfill_from', '40');
+    setIndexerState(db, 'backfill_ledger', '40');
+    const app = await buildApi({
+      db,
+      config: testConfig(),
+      runtime: testRuntime({ networkLedgerIndex: 102 }),
+    });
+    const response = await app.inject({ method: 'GET', url: '/v1/status' });
+    const body = response.json() as { data: Status };
+    assert.equal(body.data.history_start_ledger, 40);
     await app.close();
   });
 
