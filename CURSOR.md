@@ -68,6 +68,7 @@ src/
   util/
     xahau.ts        — currency normalisation, account validation, hex helpers, blackhole
     domain.ts       — /.well-known/xahau.toml fetcher/parser
+    uriPayload.ts   — classify URI + decode on-chain URI blobs (Evernode evrlease)
     retry.ts        — exponential backoff
 public/docs/        — branded API docs page
 dist/               — compiled output (gitignored)

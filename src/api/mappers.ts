@@ -1,6 +1,7 @@
 import type { DexTrade, HookState, Issuer, OHLCVCandle, Token, TrustLine, URIToken } from '../types/api.js';
 import { parseStoredTomlLinks } from '../util/domain.js';
 import { metadataFromRow } from '../util/icon.js';
+import { classifyUri, resolveUriTokenMetadata } from '../util/uriPayload.js';
 import type {
   DexTradeRow,
   HookAccountRow,
@@ -77,6 +78,7 @@ export function uriTokenFromRow(
     id: row.id,
     uri: row.uri,
     uri_raw: row.uri_raw,
+    uri_kind: classifyUri(row.uri),
     digest: row.digest,
     issuer: row.issuer,
     owner: row.owner,
@@ -88,7 +90,7 @@ export function uriTokenFromRow(
     mint_ledger: row.mint_ledger,
     last_updated: row.last_updated,
     icon_url: row.icon_url,
-    metadata: metadataFromRow(row.uri_metadata),
+    metadata: resolveUriTokenMetadata(row.uri, row.uri_raw, metadataFromRow(row.uri_metadata)),
     ...(extras?.remarks === undefined ? {} : { remarks: extras.remarks }),
     ...(extras?.transferCount === undefined ? {} : { transfer_count: extras.transferCount }),
   };

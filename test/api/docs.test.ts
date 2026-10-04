@@ -29,6 +29,7 @@ describe('API docs', () => {
     assert.match(docs.body, /XahauIndex/);
     assert.match(docs.body, /\/v1\/tokens\/\{currency\}\/\{issuer\}/);
     assert.match(docs.body, /\/v1\/subscribe/);
+    assert.match(docs.body, /source: "onchain"/);
 
     const root = await app.inject({ method: 'GET', url: '/' });
     assert.equal(root.statusCode, 200);
