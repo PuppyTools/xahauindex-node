@@ -43,7 +43,7 @@ The API listens on `http://localhost:3000`. Docs are at `http://localhost:3000/d
 ### Node.js (development)
 
 ```bash
-node --version  # requires Node.js 20+
+node --version  # requires Node.js 22+
 npm install
 cp .env.example .env
 npm run dev

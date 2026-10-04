@@ -13,7 +13,7 @@ Repo: `github.com/PuppyTools/xahauindex-node`
 | Concern | Choice | Reason |
 |---------|--------|--------|
 | Language | TypeScript (strict) | Type safety for complex ledger object shapes |
-| Runtime | Node.js 20+ ESM | Owner preference |
+| Runtime | Node.js 22+ ESM | better-sqlite3 13 requires Node 22+ |
 | Build | `tsc` → `dist/` | Standard, no bundler complexity needed |
 | Database | SQLite (`better-sqlite3`) | Zero-dependency self-hosting |
 | Ledger client | `@transia/xrpl` | Xahau-specific types (URIToken, SetHook, SetRemarks) |
