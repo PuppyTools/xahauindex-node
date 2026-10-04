@@ -6,4 +6,4 @@ data
 coverage
 *.log
 test
-docs
+docs/*.md

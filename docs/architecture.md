@@ -29,7 +29,7 @@ XahauIndex has three layers: an **ingester** (snapshot + live WebSocket), a **SQ
                            │  reads
                            ▼
 ┌─────────────────────────────────────────────────────────────────┐
-│  Fastify API  :API_PORT/v1/…   WS /v1/subscribe                  │
+│  Fastify API  :API_PORT/docs + /v1/…   WS /v1/subscribe          │
 └─────────────────────────────────────────────────────────────────┘
 ```
 

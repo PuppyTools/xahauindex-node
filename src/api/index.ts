@@ -7,6 +7,7 @@ import type { LogLevel } from '../config.js';
 import type { AppContext } from './context.js';
 import { ApiError } from './errors.js';
 import { createHub } from './hub.js';
+import { docsRoutes } from './routes/docs.js';
 import { hookRoutes } from './routes/hooks.js';
 import { issuerRoutes } from './routes/issuers.js';
 import { priceRoutes } from './routes/prices.js';
@@ -38,6 +39,7 @@ export async function buildApi(
 
   await app.register(cors, { origin: true });
   await app.register(websocket);
+  await app.register(docsRoutes);
   await app.register(statusRoutes);
   await app.register(tokenRoutes);
   await app.register(uriTokenRoutes);

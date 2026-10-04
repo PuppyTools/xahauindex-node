@@ -36,7 +36,7 @@ cp .env.example .env
 docker compose up -d
 ```
 
-The API listens on `http://localhost:3000`. Point a reverse proxy at that port for public access.
+The API listens on `http://localhost:3000`. Docs are at `http://localhost:3000/docs`. Point a reverse proxy at that port for public access.
 
 ### Node.js (development)
 
@@ -85,6 +85,8 @@ If both start bounds are set, `BACKFILL_FROM_LEDGER` wins. Use a full-history no
 ## API
 
 Base URL: `http://localhost:3000`
+
+Human docs: [`/docs`](http://localhost:3000/docs). Machine contract: [`/v1/openapi.yaml`](http://localhost:3000/v1/openapi.yaml).
 
 All responses use `{ data, meta: { count, page, ledger_index } }`.
 

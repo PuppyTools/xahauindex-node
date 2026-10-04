@@ -12,6 +12,8 @@ RUN npm ci
 COPY tsconfig.json ./
 COPY scripts ./scripts
 COPY src ./src
+COPY public ./public
+COPY docs/openapi.yaml ./docs/openapi.yaml
 RUN npm run build && npm prune --omit=dev
 
 FROM node:20-bookworm-slim
