@@ -7,6 +7,7 @@ import type { LogLevel } from '../config.js';
 import type { AppContext } from './context.js';
 import { ApiError } from './errors.js';
 import { createHub } from './hub.js';
+import { registerApiRateLimit } from './rateLimit.js';
 import { docsRoutes } from './routes/docs.js';
 import { hookRoutes } from './routes/hooks.js';
 import { issuerRoutes } from './routes/issuers.js';
@@ -30,6 +31,7 @@ export async function buildApi(
 ): Promise<AppInstance> {
   const app = Fastify({
     logger: logLevel === undefined ? false : { level: logLevel },
+    trustProxy: context.config.apiTrustProxy,
   }).withTypeProvider<TypeBoxTypeProvider>();
 
   app.decorate('db', context.db);
@@ -39,6 +41,7 @@ export async function buildApi(
 
   await app.register(cors, { origin: true });
   await app.register(websocket);
+  await registerApiRateLimit(app, context.config);
   await app.register(docsRoutes);
   await app.register(statusRoutes);
   await app.register(tokenRoutes);
@@ -66,6 +69,12 @@ export async function buildApi(
     }
 
     const statusCode = error.statusCode ?? 500;
+    if (statusCode === 429) {
+      reply.status(429).send({
+        error: { code: 'RATE_LIMITED', message: 'Too many requests' },
+      });
+      return;
+    }
     const code = statusCode === 400 ? 'BAD_REQUEST' : 'INTERNAL';
     app.log.error({ err: error }, error.message);
     reply.status(statusCode).send({

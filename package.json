@@ -17,6 +17,7 @@
   },
   "dependencies": {
     "@fastify/cors": "^11.3.0",
+    "@fastify/rate-limit": "^11.2.0",
     "@fastify/type-provider-typebox": "^6.1.0",
     "@fastify/websocket": "^11.3.3",
     "@transia/xrpl": "^4.4.6-alpha.2",

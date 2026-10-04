@@ -101,4 +101,22 @@ describe('WS /v1/subscribe', () => {
     socket.close();
     await app.close();
   });
+
+  it('rejects a second subscribe socket from the same IP', async () => {
+    const db = memoryDb();
+    const app = await buildApi({
+      db,
+      config: testConfig({ apiWsMaxPerIp: 1 }),
+      runtime: testRuntime(),
+    });
+    await app.ready();
+    const first = await app.injectWS('/v1/subscribe');
+    await assert.rejects(() => app.injectWS('/v1/subscribe'), (error: unknown) => {
+      assert.ok(error instanceof Error);
+      assert.match(error.message, /429|Unexpected server response/i);
+      return true;
+    });
+    first.close();
+    await app.close();
+  });
 });
