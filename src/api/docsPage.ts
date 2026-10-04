@@ -47,6 +47,10 @@ function escapePre(value: string): string {
 function inlineMarkdown(value: string): string {
   const escaped = escapeHtml(value);
   return escaped
+    .replaceAll(
+      /\[([^\]]+)\]\((https?:\/\/[^)\s]+)\)/g,
+      '<a href="$2" target="_blank" rel="noreferrer">$1</a>',
+    )
     .replaceAll(/`([^`]+)`/g, '<code>$1</code>')
     .replaceAll('\n', '<br>');
 }
