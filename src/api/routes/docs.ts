@@ -11,9 +11,17 @@ export const docsRoutes: FastifyPluginAsync = async (app) => {
   const html = renderDocsHtml(spec);
   const cookbook = renderCookbookMarkdown(spec);
   const css = readFileSync(resolveAsset('public/docs/docs.css'), 'utf8');
+  const mark = readFileSync(resolveAsset('public/docs/xi.svg'));
+  const favicon = readFileSync(resolveAsset('public/docs/favicon.svg'));
 
   const sendDocs = async (_request: FastifyRequest, reply: FastifyReply) => {
     return reply.type('text/html; charset=utf-8').send(html);
+  };
+  const sendMark = async (_request: FastifyRequest, reply: FastifyReply) => {
+    return reply.type('image/svg+xml; charset=utf-8').send(mark);
+  };
+  const sendFavicon = async (_request: FastifyRequest, reply: FastifyReply) => {
+    return reply.type('image/svg+xml; charset=utf-8').send(favicon);
   };
 
   app.get('/', sendDocs);
@@ -22,6 +30,9 @@ export const docsRoutes: FastifyPluginAsync = async (app) => {
   app.get('/docs/docs.css', async (_request, reply) => {
     return reply.type('text/css; charset=utf-8').send(css);
   });
+  app.get('/docs/xi.svg', sendMark);
+  app.get('/docs/favicon.svg', sendFavicon);
+  app.get('/favicon.svg', sendFavicon);
   app.get('/docs/cookbook.md', async (_request, reply) => {
     return reply.type('text/markdown; charset=utf-8').send(cookbook);
   });

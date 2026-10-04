@@ -30,6 +30,9 @@ describe('operator API rate limit', () => {
     assert.equal(isDocsPath('/'), true);
     assert.equal(isDocsPath('/docs'), true);
     assert.equal(isDocsPath('/docs/docs.css'), true);
+    assert.equal(isDocsPath('/docs/xi.svg'), true);
+    assert.equal(isDocsPath('/docs/favicon.svg'), true);
+    assert.equal(isDocsPath('/favicon.svg'), true);
     assert.equal(isDocsPath('/v1/openapi.yaml?download=1'), true);
     assert.equal(isDocsPath('/v1/status'), false);
     assert.equal(isDocsPath('/v1/tokens'), false);
@@ -61,6 +64,9 @@ describe('operator API rate limit', () => {
     const app = await appWith({ apiRateLimitMax: 1, apiRateLimitWindowMs: 60_000 });
     assert.equal((await app.inject({ method: 'GET', url: '/docs' })).statusCode, 200);
     assert.equal((await app.inject({ method: 'GET', url: '/docs/docs.css' })).statusCode, 200);
+    assert.equal((await app.inject({ method: 'GET', url: '/docs/xi.svg' })).statusCode, 200);
+    assert.equal((await app.inject({ method: 'GET', url: '/docs/favicon.svg' })).statusCode, 200);
+    assert.equal((await app.inject({ method: 'GET', url: '/favicon.svg' })).statusCode, 200);
     assert.equal((await app.inject({ method: 'GET', url: '/docs/cookbook.md' })).statusCode, 200);
     assert.equal((await app.inject({ method: 'GET', url: '/v1/openapi.yaml' })).statusCode, 200);
     assert.equal((await app.inject({ method: 'GET', url: '/' })).statusCode, 200);

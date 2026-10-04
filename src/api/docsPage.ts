@@ -333,6 +333,7 @@ export function renderDocsHtml(spec: OpenApiSpec): string {
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>${escapeHtml(spec.info.title)}</title>
   <meta name="description" content="${escapeHtml(docs.lede ?? spec.info.description ?? spec.info.title)}">
+  <link rel="icon" href="/docs/favicon.svg" type="image/svg+xml">
   <link rel="stylesheet" href="/docs/docs.css">
 </head>
 <body>
@@ -340,16 +341,7 @@ export function renderDocsHtml(spec: OpenApiSpec): string {
   <div class="app">
     <aside id="sidebar">
       <div class="brand">
-        <svg class="mark" viewBox="0 0 48 48" aria-hidden="true">
-          <defs>
-            <linearGradient id="g" x1="8" y1="4" x2="40" y2="44">
-              <stop stop-color="#2ee6a6"/>
-              <stop offset="1" stop-color="#8fd4ff"/>
-            </linearGradient>
-          </defs>
-          <path d="M24 3 43 14.5v19L24 45 5 33.5v-19L24 3z" fill="none" stroke="url(#g)" stroke-width="2.2"/>
-          <path d="M16 31 24 11l8 20M19.2 24h9.6" fill="none" stroke="#2ee6a6" stroke-width="2.2" stroke-linecap="round"/>
-        </svg>
+        <img class="mark" src="/docs/xi.svg" alt="">
         <div>
           <h1>XahauIndex</h1>
           <p>Metadata node API</p>

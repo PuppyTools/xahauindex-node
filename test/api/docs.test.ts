@@ -53,6 +53,22 @@ describe('API docs', () => {
     assert.match(docs.body, /curl -s '?http:\/\/localhost:3000\/v1\/tokens/);
     assert.match(docs.body, /curl -s '?http:\/\/localhost:3000\/v1\/uritokens/);
     assert.match(docs.body, /curl -s '?http:\/\/localhost:3000\/v1\/prices/);
+    assert.match(docs.body, /\/docs\/xi\.svg/);
+    assert.match(docs.body, /rel="icon" href="\/docs\/favicon\.svg"/);
+    assert.doesNotMatch(docs.body, /M24 3 43 14\.5/);
+
+    const mark = await app.inject({ method: 'GET', url: '/docs/xi.svg' });
+    assert.equal(mark.statusCode, 200);
+    assert.match(mark.headers['content-type'] ?? '', /image\/svg\+xml/);
+    assert.match(mark.body, /M44\.1611 62\.9598/);
+    assert.doesNotMatch(mark.body, /445\.318/);
+
+    const favicon = await app.inject({ method: 'GET', url: '/docs/favicon.svg' });
+    assert.equal(favicon.statusCode, 200);
+    assert.match(favicon.headers['content-type'] ?? '', /image\/svg\+xml/);
+    assert.match(favicon.body, /M44\.1611 62\.9598/);
+    assert.doesNotMatch(favicon.body, /445\.318/);
+    assert.equal((await app.inject({ method: 'GET', url: '/favicon.svg' })).statusCode, 200);
 
     const css = await app.inject({ method: 'GET', url: '/docs/docs.css' });
     assert.equal(css.statusCode, 200);

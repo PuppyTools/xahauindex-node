@@ -12,6 +12,7 @@ export function isDocsPath(url: string): boolean {
     path === '/docs' ||
     path === '/docs/' ||
     path.startsWith('/docs/') ||
+    path === '/favicon.svg' ||
     path === '/v1/openapi.yaml'
   );
 }
