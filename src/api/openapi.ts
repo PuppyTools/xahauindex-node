@@ -72,11 +72,22 @@ export interface DocsCard {
   body: string;
 }
 
+export interface DocsDonate {
+  label?: string;
+  address?: string;
+}
+
+export interface DocsTry {
+  title?: string;
+  body?: string;
+}
+
 export interface DocsExtension {
   kicker?: string;
   headline?: string;
   lede?: string;
-  chips?: string[];
+  donate?: DocsDonate;
+  try?: DocsTry;
   conventions?: DocsCard[];
   recipes?: DocsCard[];
   schema_cards?: string[];

@@ -62,6 +62,11 @@ describe('API docs', () => {
     assert.match(docs.body, /\/docs\/xi\.svg/);
     assert.match(docs.body, /rel="icon" href="\/docs\/favicon\.svg"/);
     assert.doesNotMatch(docs.body, /M24 3 43 14\.5/);
+    assert.match(docs.body, /Self-hostable data layer for your wallet, explorer, or dapp/);
+    assert.doesNotMatch(docs.body, /missing data layer/);
+    assert.doesNotMatch(docs.body, /class="chip"/);
+    assert.match(docs.body, /rPUPpkfohJsWVoXoXDbNZ7zKfk2FBB8Xwo/);
+    assert.doesNotMatch(docs.body, /Try this node/);
 
     const mark = await app.inject({ method: 'GET', url: '/docs/xi.svg' });
     assert.equal(mark.statusCode, 200);
@@ -94,6 +99,28 @@ describe('API docs', () => {
     const cookbook = await app.inject({ method: 'GET', url: '/docs/cookbook.md' });
     assert.equal(cookbook.statusCode, 200);
     assert.match(cookbook.body, /curl -s http:\/\/localhost:3000\/v1\/status/);
+
+    await app.close();
+  });
+
+  it('shows this process rate limits on a public limited node', async () => {
+    const db = openDatabase(':memory:');
+    dbs.push(db);
+    const app = await buildApi({
+      db,
+      config: testConfig({ apiRateLimitMax: 120, apiRateLimitWindowMs: 60_000 }),
+      runtime: testRuntime(),
+    });
+
+    const docs = await app.inject({ method: 'GET', url: '/docs' });
+    assert.equal(docs.statusCode, 200);
+    assert.match(docs.body, /<div class="limits">/);
+    assert.match(docs.body, /Try this node/);
+    assert.match(docs.body, /Feel free to test this instance/);
+    assert.match(docs.body, /120 requests per IP every 1 minute/);
+    assert.match(docs.body, /8 concurrent sockets per IP/);
+    assert.doesNotMatch(docs.body, /<aside class="try"/);
+    assert.doesNotMatch(docs.body, /<aside class="limits"/);
 
     await app.close();
   });

@@ -1,3 +1,4 @@
+import { resolveWsMaxPerIp, type Config } from '../config.js';
 import type {
   CookbookEntry,
   DocsCard,
@@ -318,7 +319,53 @@ export function replaceCookbookSection(source: string, cookbook: string): string
   return `${source.slice(0, start + COOKBOOK_START.length)}\n\n${cookbook.trim()}\n\n${source.slice(end)}`;
 }
 
-export function renderDocsHtml(spec: OpenApiSpec): string {
+export function formatDurationMs(ms: number): string {
+  if (ms % 60_000 === 0) {
+    const minutes = ms / 60_000;
+    return minutes === 1 ? '1 minute' : `${minutes} minutes`;
+  }
+  if (ms % 1000 === 0) {
+    const seconds = ms / 1000;
+    return seconds === 1 ? '1 second' : `${seconds} seconds`;
+  }
+  return `${ms} ms`;
+}
+
+function renderDonate(docs: NonNullable<OpenApiSpec['x-docs']>): string {
+  const address = docs.donate?.address?.trim() ?? '';
+  if (address === '') {
+    return '';
+  }
+  const label = docs.donate?.label?.trim() || 'Donations in XAH';
+  return `<p class="donate">${escapeHtml(label)}: <code>${escapeHtml(address)}</code></p>`;
+}
+
+function renderTry(spec: OpenApiSpec, config?: Config): string {
+  if (config === undefined || config.apiRateLimitMax === null) {
+    return '';
+  }
+  const docs = spec['x-docs'] ?? {};
+  const title = docs.try?.title?.trim() || 'Try this node';
+  const body =
+    docs.try?.body?.trim() ||
+    'Feel free to test this instance. These are the limits on this process.';
+  const window = formatDurationMs(config.apiRateLimitWindowMs);
+  const ws = resolveWsMaxPerIp(config);
+  const wsLine =
+    ws === null
+      ? ''
+      : `<li><code>/v1/subscribe</code> — ${ws.toLocaleString('en-US')} concurrent sockets per IP</li>`;
+  return `<div class="limits">
+        <h3>${escapeHtml(title)}</h3>
+        <p>${inlineMarkdown(body)}</p>
+        <ul>
+          <li>HTTP — ${config.apiRateLimitMax.toLocaleString('en-US')} requests per IP every ${escapeHtml(window)}</li>
+          ${wsLine}
+        </ul>
+      </div>`;
+}
+
+export function renderDocsHtml(spec: OpenApiSpec, config?: Config): string {
   const docs = spec['x-docs'] ?? {};
   const cookbook = cookbookOf(spec);
   const tags = tagOrder(spec);
@@ -379,9 +426,8 @@ export function renderDocsHtml(spec: OpenApiSpec): string {
         <div class="kicker">${escapeHtml(docs.kicker ?? 'Xahau network · self-hosted')}</div>
         <h2>${escapeHtml(docs.headline ?? spec.info.title)}</h2>
         <p class="lede">${inlineMarkdown(docs.lede ?? spec.info.description ?? '')}</p>
-        <div class="chips">
-          ${(docs.chips ?? []).map((chip) => `<span class="chip">${inlineMarkdown(chip)}</span>`).join('\n          ')}
-        </div>
+        ${renderDonate(docs)}
+        ${renderTry(spec, config)}
       </header>
 
       <section id="conventions">
