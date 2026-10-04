@@ -1,7 +1,7 @@
 import cors from '@fastify/cors';
 import type { TypeBoxTypeProvider } from '@fastify/type-provider-typebox';
 import websocket from '@fastify/websocket';
-import Fastify, { type FastifyError, type FastifyInstance } from 'fastify';
+import Fastify, { type FastifyError, type FastifyInstance, type FastifyReply, type FastifyRequest } from 'fastify';
 
 import type { LogLevel } from '../config.js';
 import type { AppContext } from './context.js';
@@ -25,6 +25,15 @@ export type AppInstance = FastifyInstance<
   TypeBoxTypeProvider
 >;
 
+function sendNotFound(request: FastifyRequest, reply: FastifyReply): void {
+  reply.status(404).send({
+    error: {
+      code: 'NOT_FOUND',
+      message: `No route ${request.method} ${request.url}`,
+    },
+  });
+}
+
 export async function buildApi(
   context: AppContext,
   logLevel?: LogLevel,
@@ -38,27 +47,6 @@ export async function buildApi(
   app.decorate('config', context.config);
   app.decorate('runtime', context.runtime);
   app.decorate('hub', context.hub ?? createHub());
-
-  await app.register(cors, { origin: true });
-  await app.register(websocket);
-  await registerApiRateLimit(app, context.config);
-  await app.register(docsRoutes);
-  await app.register(statusRoutes);
-  await app.register(tokenRoutes);
-  await app.register(uriTokenRoutes);
-  await app.register(issuerRoutes);
-  await app.register(hookRoutes);
-  await app.register(priceRoutes);
-  await app.register(subscribeRoutes);
-
-  app.setNotFoundHandler((request, reply) => {
-    reply.status(404).send({
-      error: {
-        code: 'NOT_FOUND',
-        message: `No route ${request.method} ${request.url}`,
-      },
-    });
-  });
 
   app.setErrorHandler((error: FastifyError | ApiError, _request, reply) => {
     if (error instanceof ApiError) {
@@ -84,6 +72,24 @@ export async function buildApi(
       },
     });
   });
+
+  await app.register(cors, { origin: true });
+  await app.register(websocket);
+  await registerApiRateLimit(app, context.config);
+  await app.register(docsRoutes);
+  await app.register(statusRoutes);
+  await app.register(tokenRoutes);
+  await app.register(uriTokenRoutes);
+  await app.register(issuerRoutes);
+  await app.register(hookRoutes);
+  await app.register(priceRoutes);
+  await app.register(subscribeRoutes);
+
+  if (context.config.apiRateLimitMax === null) {
+    app.setNotFoundHandler(sendNotFound);
+  } else {
+    app.setNotFoundHandler({ preHandler: app.rateLimit() }, sendNotFound);
+  }
 
   return app;
 }

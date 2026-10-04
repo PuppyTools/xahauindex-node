@@ -1,7 +1,6 @@
 import type { FastifyPluginAsync } from 'fastify';
 
 import { resolveWsMaxPerIp } from '../../config.js';
-import { rateLimited } from '../errors.js';
 import { isStreamName, type HubClient, type StreamName } from '../hub.js';
 import { createWsConnectionTracker } from '../wsLimit.js';
 
@@ -27,61 +26,58 @@ export const subscribeRoutes: FastifyPluginAsync = async (app) => {
   const maxPerIp = resolveWsMaxPerIp(app.config);
   const tracker = createWsConnectionTracker();
 
-  app.get(
-    '/v1/subscribe',
-    {
-      websocket: true,
-      ...(maxPerIp === null
-        ? {}
-        : {
-            preHandler: async (request) => {
-              if (!tracker.tryAcquire(request.ip, maxPerIp)) {
-                throw rateLimited('Too many websocket connections');
-              }
-              request.raw.once('close', () => {
-                tracker.release(request.ip);
-              });
-            },
-          }),
-    },
-    (socket) => {
-      const client: HubClient = {
-        streams: new Set(),
-        send: (payload) => {
-          socket.send(JSON.stringify(payload));
-        },
-      };
-      app.hub.add(client);
-
-      socket.on('message', (raw: Buffer | ArrayBuffer | Buffer[]) => {
-        let parsed: SubscribeMessage;
-        try {
-          parsed = JSON.parse(String(raw)) as SubscribeMessage;
-        } catch {
-          client.send({ error: { code: 'BAD_REQUEST', message: 'Invalid JSON' } });
-          return;
-        }
-        const streams = parseStreams(parsed.streams);
-        if (parsed.command === 'subscribe') {
-          for (const stream of streams) {
-            client.streams.add(stream);
-          }
-          client.send({ type: 'subscribed', streams: [...client.streams] });
-          return;
-        }
-        if (parsed.command === 'unsubscribe') {
-          for (const stream of streams) {
-            client.streams.delete(stream);
-          }
-          client.send({ type: 'unsubscribed', streams: [...client.streams] });
-          return;
-        }
-        client.send({ error: { code: 'BAD_REQUEST', message: 'Unknown command' } });
+  app.get('/v1/subscribe', { websocket: true }, (socket, request) => {
+    if (maxPerIp !== null && !tracker.tryAcquire(request.ip, maxPerIp)) {
+      socket.send(
+        JSON.stringify({
+          error: { code: 'RATE_LIMITED', message: 'Too many websocket connections' },
+        }),
+      );
+      setImmediate(() => {
+        socket.close();
       });
+      return;
+    }
 
-      socket.on('close', () => {
-        app.hub.remove(client);
-      });
-    },
-  );
+    const client: HubClient = {
+      streams: new Set(),
+      send: (payload) => {
+        socket.send(JSON.stringify(payload));
+      },
+    };
+    app.hub.add(client);
+
+    socket.on('message', (raw: Buffer | ArrayBuffer | Buffer[]) => {
+      let parsed: SubscribeMessage;
+      try {
+        parsed = JSON.parse(String(raw)) as SubscribeMessage;
+      } catch {
+        client.send({ error: { code: 'BAD_REQUEST', message: 'Invalid JSON' } });
+        return;
+      }
+      const streams = parseStreams(parsed.streams);
+      if (parsed.command === 'subscribe') {
+        for (const stream of streams) {
+          client.streams.add(stream);
+        }
+        client.send({ type: 'subscribed', streams: [...client.streams] });
+        return;
+      }
+      if (parsed.command === 'unsubscribe') {
+        for (const stream of streams) {
+          client.streams.delete(stream);
+        }
+        client.send({ type: 'unsubscribed', streams: [...client.streams] });
+        return;
+      }
+      client.send({ error: { code: 'BAD_REQUEST', message: 'Unknown command' } });
+    });
+
+    socket.on('close', () => {
+      if (maxPerIp !== null) {
+        tracker.release(request.ip);
+      }
+      app.hub.remove(client);
+    });
+  });
 };
