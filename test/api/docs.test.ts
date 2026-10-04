@@ -10,6 +10,7 @@ import {
   loadOpenApiYaml,
   operationsOf,
   parseOpenApi,
+  resolveParameter,
   resolveResponse,
 } from '../../src/api/openapi.js';
 import { closeDatabase, openDatabase, type SqliteDatabase } from '../../src/db/client.js';
@@ -42,9 +43,13 @@ describe('API docs', () => {
     assert.match(docs.body, /"source": "onchain"/);
     assert.match(docs.body, /RATE_LIMITED/);
     assert.match(docs.body, /\/v1\/hooks\/definitions/);
-    assert.match(docs.body, /Evernode heartbeat/);
     assert.match(docs.body, /Recipes/);
     assert.match(docs.body, /Cookbook/);
+    assert.match(docs.body, /<details class="sample">/);
+    assert.doesNotMatch(docs.body, /<details class="sample" open/);
+    assert.doesNotMatch(docs.body, /Evernode governor/);
+    assert.match(docs.body, /<button class="copy"/);
+    assert.doesNotMatch(docs.body, /data-copy=/);
     assert.match(docs.body, /curl -s '?http:\/\/localhost:3000\/v1\/tokens/);
     assert.match(docs.body, /curl -s '?http:\/\/localhost:3000\/v1\/uritokens/);
     assert.match(docs.body, /curl -s '?http:\/\/localhost:3000\/v1\/prices/);
@@ -84,6 +89,21 @@ describe('API docs', () => {
         values.length > 0 || messages.length > 0,
         `${method.toUpperCase()} ${path} needs a JSON example or x-messages`,
       );
+    }
+  });
+
+  it('describes every path parameter', () => {
+    const spec = loadOpenApi();
+    for (const { path, method, operation } of operationsOf(spec)) {
+      for (const raw of operation.parameters ?? []) {
+        const parameter = resolveParameter(spec, raw);
+        const description = parameter.description ?? parameter.schema?.description ?? '';
+        assert.notEqual(
+          description.trim(),
+          '',
+          `${method.toUpperCase()} ${path} ${parameter.name ?? '?'} needs a description`,
+        );
+      }
     }
   });
 

@@ -95,6 +95,30 @@ function renderCards(cards: DocsCard[] | undefined, empty: string): string {
     .join('')}</div>`;
 }
 
+function parameterDescription(parameter: {
+  description?: string;
+  schema?: { description?: string; enum?: unknown[]; default?: unknown; type?: string };
+}): string {
+  if (parameter.description !== undefined && parameter.description !== '') {
+    return parameter.description;
+  }
+  const schema = parameter.schema;
+  if (schema?.description !== undefined && schema.description !== '') {
+    return schema.description;
+  }
+  const bits: string[] = [];
+  if (schema?.enum !== undefined && schema.enum.length > 0) {
+    bits.push(schema.enum.map(String).join(', '));
+  }
+  if (schema?.default !== undefined) {
+    bits.push(`Default ${String(schema.default)}`);
+  }
+  if (bits.length === 0 && schema?.type !== undefined) {
+    bits.push(schema.type);
+  }
+  return bits.join('. ');
+}
+
 function renderParameters(spec: OpenApiSpec, operation: OpenApiOperation): string {
   const parameters = (operation.parameters ?? []).map((parameter) => resolveParameter(spec, parameter));
   if (parameters.length === 0) {
@@ -105,21 +129,28 @@ function renderParameters(spec: OpenApiSpec, operation: OpenApiOperation): strin
       const name = parameter.name ?? '';
       const loc = parameter.in ?? 'query';
       const optional = parameter.required === true ? '' : ' opt';
-      const description = parameter.description ?? parameter.schema?.description ?? '';
+      const description = parameterDescription(parameter);
       return `<tr><td><code>${escapeHtml(name)}</code></td><td><span class="pill${optional}">${escapeHtml(loc)}</span></td><td>${inlineMarkdown(description)}</td></tr>`;
     })
     .join('');
   return `<table><thead><tr><th>Param</th><th></th><th>Description</th></tr></thead><tbody>${rows}</tbody></table>`;
 }
 
+function renderCodeBlock(label: string, text: string): string {
+  return `<details class="sample">
+          <summary>
+            <span>${escapeHtml(label)}</span>
+            <button class="copy" type="button">Copy</button>
+          </summary>
+          <pre>${escapePre(text)}</pre>
+        </details>`;
+}
+
 function renderExamples(spec: OpenApiSpec, operation: OpenApiOperation): string {
   const blocks: string[] = [];
   if (operation['x-messages'] !== undefined) {
     for (const message of operation['x-messages']) {
-      const json = prettyJson(message.value);
-      blocks.push(
-        `<p class="sub">${escapeHtml(message.title)}</p><button class="copy" type="button" data-copy="${escapeHtml(json)}">Copy</button><pre>${escapePre(json)}</pre>`,
-      );
+      blocks.push(renderCodeBlock(message.title, prettyJson(message.value)));
     }
     return blocks.join('');
   }
@@ -127,10 +158,7 @@ function renderExamples(spec: OpenApiSpec, operation: OpenApiOperation): string 
     const resolved = resolveResponse(spec, response);
     const media = resolved.content?.['application/json'];
     for (const value of exampleValues(spec, media)) {
-      const json = prettyJson(value);
-      blocks.push(
-        `<button class="copy" type="button" data-copy="${escapeHtml(json)}">Copy</button><pre>${escapePre(json)}</pre>`,
-      );
+      blocks.push(renderCodeBlock('Sample response', prettyJson(value)));
     }
   }
   return blocks.join('');
@@ -167,21 +195,9 @@ function renderTagSection(spec: OpenApiSpec, tag: string): string {
   const tagMeta = spec.tags?.find((item) => item.name === tag);
   const title = tagTitle(tag);
   const description = tagMeta?.description ?? '';
-  const extra: string[] = [];
-  if (tag === 'hooks') {
-    const catalog = spec['x-docs']?.catalog;
-    if (catalog?.rows !== undefined && catalog.rows.length > 0) {
-      extra.push(
-        `<table><thead><tr><th>Catalog</th><th>Account</th></tr></thead><tbody>${catalog.rows
-          .map((row) => `<tr><td>${escapeHtml(row.name)}</td><td><code>${escapeHtml(row.account)}</code></td></tr>`)
-          .join('')}</tbody></table>`,
-      );
-    }
-  }
   return `<section id="${escapeHtml(tag)}">
         <h3>${escapeHtml(title)}</h3>
         ${description === '' ? '' : `<p class="sub">${inlineMarkdown(description)}</p>`}
-        ${extra.join('')}
         ${ops.map(({ path, method, operation }) => renderOperation(spec, path, method, operation)).join('')}
       </section>`;
 }
@@ -231,9 +247,11 @@ function renderCookbookHtml(entries: CookbookEntry[]): string {
     .map((entry) => {
       const curl = entry.curl.trim();
       return `<article class="card cookbook">
-          <h4>${escapeHtml(entry.title)}</h4>
+          <div class="code-head">
+            <h4>${escapeHtml(entry.title)}</h4>
+            <button class="copy" type="button">Copy</button>
+          </div>
           ${entry.note === undefined ? '' : `<p>${inlineMarkdown(entry.note)}</p>`}
-          <button class="copy" type="button" data-copy="${escapeHtml(curl)}">Copy</button>
           <pre>${escapePre(curl)}</pre>
         </article>`;
     })
@@ -426,13 +444,44 @@ export function renderDocsHtml(spec: OpenApiSpec): string {
       });
     }
 
-    for (const button of document.querySelectorAll('[data-copy]')) {
-      button.addEventListener('click', async () => {
-        await navigator.clipboard.writeText(button.getAttribute('data-copy') || '');
+    const copyText = async (text) => {
+      if (navigator.clipboard && window.isSecureContext) {
+        try {
+          await navigator.clipboard.writeText(text);
+          return;
+        } catch (_error) {
+          // fall through to execCommand
+        }
+      }
+      const area = document.createElement('textarea');
+      area.value = text;
+      area.setAttribute('readonly', '');
+      area.style.position = 'fixed';
+      area.style.left = '-9999px';
+      document.body.appendChild(area);
+      area.select();
+      document.execCommand('copy');
+      area.remove();
+    };
+
+    document.addEventListener('click', async (event) => {
+      const button = event.target.closest('button.copy');
+      if (!button) {
+        return;
+      }
+      event.preventDefault();
+      event.stopPropagation();
+      const block = button.closest('details, article, .code-block');
+      const pre = block ? block.querySelector('pre') : null;
+      const text = pre ? pre.textContent || '' : '';
+      try {
+        await copyText(text);
         button.textContent = 'Copied';
-        setTimeout(() => { button.textContent = 'Copy'; }, 1200);
-      });
-    }
+      } catch (_error) {
+        button.textContent = 'Copy failed';
+      }
+      setTimeout(() => { button.textContent = 'Copy'; }, 1200);
+    });
   </script>
 </body>
 </html>

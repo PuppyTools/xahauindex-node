@@ -228,15 +228,55 @@ th { color: var(--muted); font-size: 12px; font-weight: 600; }
 }
 .pill.opt { color: var(--muted); }
 .copy {
-  float: right;
-  border: 0;
-  background: transparent;
-  color: var(--muted);
+  margin-left: auto;
+  border: 1px solid var(--line);
+  background: var(--panel);
+  color: var(--text);
+  border-radius: 999px;
+  padding: 4px 10px;
   cursor: pointer;
   font-size: 12px;
 }
-.copy:hover { color: var(--teal); }
+.copy:hover { border-color: var(--teal); color: var(--teal); }
+.code-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 8px;
+}
+.code-head h4 { margin: 0; }
 .cookbook { margin: 16px 0; }
+.cookbook pre {
+  margin: 0;
+}
+.sample {
+  margin: 14px 0 0;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: #06110e;
+}
+.sample summary {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  list-style: none;
+  cursor: pointer;
+  padding: 10px 14px;
+  color: var(--muted);
+  font-size: 13px;
+}
+.sample summary::-webkit-details-marker { display: none; }
+.sample summary::before {
+  content: "▸";
+  color: var(--teal);
+}
+.sample[open] summary::before { content: "▾"; }
+.sample[open] summary { border-bottom: 1px solid var(--line); }
+.sample pre {
+  border: 0;
+  margin: 0;
+  background: transparent;
+}
 footer {
   margin-top: 64px;
   color: var(--muted);

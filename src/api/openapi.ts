@@ -14,6 +14,7 @@ export interface OpenApiSchema {
   description?: string;
   nullable?: boolean;
   enum?: unknown[];
+  default?: unknown;
   properties?: Record<string, OpenApiSchema>;
   items?: OpenApiSchema;
   $ref?: string;
@@ -71,11 +72,6 @@ export interface DocsCard {
   body: string;
 }
 
-export interface DocsCatalogRow {
-  name: string;
-  account: string;
-}
-
 export interface DocsExtension {
   kicker?: string;
   headline?: string;
@@ -83,7 +79,6 @@ export interface DocsExtension {
   chips?: string[];
   conventions?: DocsCard[];
   recipes?: DocsCard[];
-  catalog?: { title?: string; rows?: DocsCatalogRow[] };
   schema_cards?: string[];
 }
 

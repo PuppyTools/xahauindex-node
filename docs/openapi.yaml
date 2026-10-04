@@ -62,24 +62,13 @@ x-docs:
       body: >
         Health: `GET /v1/status` (`ledger_index` vs network tip). Holders:
         `/v1/tokens/{currency}/{issuer}/holders`. NFT: `/v1/uritokens/{id}` (`metadata`,
-        remarks, transfers). Hooks: `/v1/hooks/{account}` — `label` for known hashes,
-        `triggers` for HookOn, `definition.code_size` without downloading WASM.
+        remarks, transfers).         Hooks: `/v1/hooks/{account}` — `triggers` for HookOn,
+        `definition.code_size` without downloading WASM.
     - title: DEX UI
       body: >
         Candles: `GET /v1/prices/{base}/{counter}?period=1h&from=&to=`. Tape:
         `/v1/trades/{base}/{counter}`. Native XAH has a null issuer — omit the issuer
         query. Live: subscribe to `prices`.
-  catalog:
-    title: Known Hook labels
-    rows:
-      - name: Evernode governor
-        account: rBvKgF3jSZWdJcwSsmoJspoXLLDVLDp6jg
-      - name: Evernode registry
-        account: rmv53yu8Wid6kj6AC6NvmiwSXNxRa8vTH
-      - name: Evernode heartbeat
-        account: rHktfGUbjqzU4GsYCMc1pDjdHXb5CJamto
-      - name: Evernode reputation
-        account: rsfTBRAbD2bYjVuXhJ2RReQXxR4K5birVW
   schema_cards:
     - Token
     - URIToken
@@ -119,8 +108,7 @@ x-cookbook:
   - title: DEX trade tape
     curl: |
       curl -s 'http://localhost:3000/v1/trades/USD/XAH?base_issuer=rHb9CJAWyB4rj91VRWn96DkukG4bwdtyTh&per_page=5'
-  - title: Evernode heartbeat hooks
-    note: "The account is stable; the hash can rotate. `label` still names the slot."
+  - title: Account hook state
     curl: |
       curl -s http://localhost:3000/v1/hooks/rHktfGUbjqzU4GsYCMc1pDjdHXb5CJamto
   - title: Hook definitions
@@ -144,11 +132,10 @@ tags:
   - name: prices
     description: DEX-derived historical OHLCV and trade tape
   - name: hooks
-    description: |
-      Hook activity per account. Install slots come from the `Hook` ledger object.
-      Shared WASM metadata is a `HookDefinition` (`code_size` only — bytecode is not stored).
-      `label` is a static catalog: current Evernode hashes, or the four stable Evernode
-      system accounts if governance rotated the WASM. Unknown hooks return `label: null`.
+    description: >
+      Accounts that currently own a `Hook` ledger object. Each slot includes the
+      install fields plus the shared `HookDefinition`. HookOn bitmasks become
+      `triggers`. WASM is not stored. Empty slots are dropped.
   - name: subscribe
     description: Real-time streams on the same port. No separate WebSocket host.
 
@@ -157,6 +144,7 @@ components:
     page:
       name: page
       in: query
+      description: Page number. Default 1
       schema:
         type: integer
         minimum: 1
@@ -164,6 +152,7 @@ components:
     per_page:
       name: per_page
       in: query
+      description: Rows per page (1–100). Default 20
       schema:
         type: integer
         minimum: 1
@@ -172,6 +161,7 @@ components:
     sort_tokens:
       name: sort
       in: query
+      description: Sort by `holder_count`, `trust_count`, or `first_ledger`
       schema:
         type: string
         enum: [holder_count, trust_count, first_ledger]
@@ -1354,14 +1344,17 @@ paths:
         - $ref: '#/components/parameters/sort_tokens'
         - name: issuer
           in: query
+          description: Filter by issuer r-address
           schema:
             type: string
         - name: currency
           in: query
+          description: Filter by 3-character code or 40-character hex
           schema:
             type: string
         - name: domain_verified
           in: query
+          description: If true, only tokens whose issuer passed `xahau.toml` verification
           schema:
             type: boolean
         - name: q
@@ -1460,25 +1453,30 @@ paths:
         - $ref: '#/components/parameters/per_page'
         - name: sort
           in: query
+          description: Sort by `mint_ledger` or `last_updated`
           schema:
             type: string
             enum: [mint_ledger, last_updated]
             default: mint_ledger
         - name: issuer
           in: query
+          description: Filter by issuer r-address
           schema:
             type: string
         - name: owner
           in: query
+          description: Filter by current owner r-address
           schema:
             type: string
         - name: burned
           in: query
+          description: Include burned tokens. Default false
           schema:
             type: boolean
             default: false
         - name: for_sale
           in: query
+          description: If true, only tokens with an active sell offer
           schema:
             type: boolean
       responses:
@@ -1508,6 +1506,7 @@ paths:
         - name: id
           in: path
           required: true
+          description: URITokenID (64 hex characters)
           schema:
             type: string
             pattern: '^[A-Fa-f0-9]{64}$'
@@ -1540,16 +1539,19 @@ paths:
         - $ref: '#/components/parameters/per_page'
         - name: sort
           in: query
+          description: Sort by `token_count` or `first_ledger`
           schema:
             type: string
             enum: [token_count, first_ledger]
             default: token_count
         - name: domain_verified
           in: query
+          description: If true, only issuers that passed `xahau.toml` verification
           schema:
             type: boolean
         - name: has_hooks
           in: query
+          description: If true, only issuers that currently own a Hook object
           schema:
             type: boolean
       responses:
@@ -1579,6 +1581,7 @@ paths:
         - name: account
           in: path
           required: true
+          description: Issuer r-address
           schema:
             type: string
       responses:
@@ -1617,6 +1620,7 @@ paths:
         - $ref: '#/components/parameters/counter_issuer'
         - name: period
           in: query
+          description: Calendar candle size. `1h`, `24h`, or `7d` (default 24h)
           schema:
             type: string
             enum: ['1h', '24h', '7d']
@@ -1690,7 +1694,7 @@ paths:
       operationId: listHookDefinitions
       tags: [hooks]
       summary: List indexed HookDefinition objects
-      description: Shared WASM metadata. `label` is attached when the hash is in the catalog.
+      description: Shared HookDefinition metadata (`code_size`, defaults, fees). Bytecode is not stored.
       x-try: /v1/hooks/definitions?per_page=5
       parameters:
         - $ref: '#/components/parameters/page'
@@ -1722,6 +1726,7 @@ paths:
         - name: hook_hash
           in: path
           required: true
+          description: HookDefinition hash (64 hex characters)
           schema:
             type: string
       responses:
@@ -1747,13 +1752,12 @@ paths:
       operationId: getHooks
       tags: [hooks]
       summary: Hook state for a Xahau account
-      description: |
-        404 if that account has no indexed Hook object. Known Evernode accounts still
-        receive a `label` after a hash rotation.
+      description: 404 if that account has no indexed Hook object.
       parameters:
         - name: account
           in: path
           required: true
+          description: Account r-address
           schema:
             type: string
       responses:
@@ -1785,6 +1789,7 @@ paths:
         - $ref: '#/components/parameters/per_page'
         - name: hook_hash
           in: query
+          description: Only accounts that currently install this hash
           schema:
             type: string
       responses:

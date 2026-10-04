@@ -190,9 +190,7 @@ curl -s 'http://localhost:3000/v1/prices/USD/XAH?base_issuer=rHb9CJAWyB4rj91VRWn
 curl -s 'http://localhost:3000/v1/trades/USD/XAH?base_issuer=rHb9CJAWyB4rj91VRWn96DkukG4bwdtyTh&per_page=5'
 ```
 
-## Evernode heartbeat hooks
-
-The account is stable; the hash can rotate. `label` still names the slot.
+## Account hook state
 
 ```bash
 curl -s http://localhost:3000/v1/hooks/rHktfGUbjqzU4GsYCMc1pDjdHXb5CJamto
