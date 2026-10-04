@@ -4,7 +4,7 @@ import { getToken } from '../db/queries/tokens.js';
 import { getUriToken } from '../db/queries/uritokens.js';
 import type { ApplyClosedLedgerResult } from '../ingester/ledger.js';
 import type { EventHub } from './hub.js';
-import { hookStateFromRow, tokenFromRow, uriTokenFromRow } from './mappers.js';
+import { hookStateFromDb, tokenFromRow, uriTokenFromRow } from './mappers.js';
 
 export function publishLedgerEvents(
   hub: EventHub,
@@ -50,7 +50,7 @@ export function publishLedgerEvents(
       hub.publish({
         stream: 'hooks',
         event: 'update',
-        data: hookStateFromRow(row),
+        data: hookStateFromDb(db, row),
         ledger_index: result.index,
       });
     }

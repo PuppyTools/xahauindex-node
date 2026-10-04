@@ -7,7 +7,7 @@ import { listTokens } from '../../db/queries/tokens.js';
 import { getHookAccount } from '../../db/queries/hooks.js';
 import { isValidAccount } from '../../util/xahau.js';
 import { notFound } from '../errors.js';
-import { hookStateFromRow, issuerFromRow, tokenFromRow } from '../mappers.js';
+import { hookStateFromDb, issuerFromRow, tokenFromRow } from '../mappers.js';
 import { asQuery, parseBoolQuery, parsePage, parsePerPage } from '../query.js';
 
 export const issuerRoutes: FastifyPluginAsync = async (app) => {
@@ -51,7 +51,7 @@ export const issuerRoutes: FastifyPluginAsync = async (app) => {
           remarks: remarksToMap(listRemarksByAccount(app.db, account)),
         }),
         tokens: tokens.map((token) => tokenFromRow(token)),
-        hooks: hooks === undefined ? null : hookStateFromRow(hooks),
+        hooks: hooks === undefined ? null : hookStateFromDb(app.db, hooks),
       },
       meta: { ledger_index: getLatestLedgerIndex(app.db) },
     };

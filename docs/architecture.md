@@ -16,7 +16,7 @@ XahauIndex has three layers: an **ingester** (snapshot + live WebSocket), a **SQ
 │  ledger.ts     — one SQLite transaction per closed ledger        │
 │  tokens.ts     — RippleState / TrustSet / IOU Payment            │
 │  uritokens.ts  — URIToken mint/burn/offer/buy                    │
-│  hooks.ts      — AccountRoot Hook array                          │
+│  hooks.ts      — Hook install + HookDefinition metadata          │
 │  remarks.ts    — Remarks decode + SetRemarks                     │
 │  issuers.ts    — AccountRoot + TOML (async worker)               │
 │  dex.ts        — executed offers → trades + calendar candles     │
@@ -29,7 +29,7 @@ XahauIndex has three layers: an **ingester** (snapshot + live WebSocket), a **SQ
                            │  reads
                            ▼
 ┌─────────────────────────────────────────────────────────────────┐
-│  Fastify API  :API_PORT/docs + /v1/…   WS /v1/subscribe          │
+│  Fastify API  :API_PORT/docs (from openapi.yaml) + /v1/…         │
 └─────────────────────────────────────────────────────────────────┘
 ```
 
@@ -61,7 +61,9 @@ Objects consumed during snapshot:
 |------|--------|
 | `RippleState` | `trust_lines`, parent `tokens` / `issuers`, remarks |
 | `URIToken` | `uri_tokens`, remarks |
-| `AccountRoot` | `issuers` (Domain / flags / later issuer), `hook_accounts`, remarks |
+| `AccountRoot` | `issuers` (Domain / flags / later issuer), remarks |
+| `Hook` | `hook_accounts`, `issuers.has_hooks` |
+| `HookDefinition` | `hook_definitions` (hash, defaults, `code_size` — not WASM) |
 
 ### Live stream
 
@@ -117,7 +119,7 @@ Well-known keys (`name`, `description`, `image`, `icon`, `website`, `attributes`
 
 ### Hooks
 
-`SetHook` replaces the stored array for that account. Persist HookOn v1 and v2 fields when present.
+Installed hooks are a `Hook` ledger object ([Xahau Hook](https://xahau.network/docs/protocol-reference/ledger-data/ledger-objects-types/hook/)): `Account` plus a `Hooks` array of `{ Hook: { HookHash, … } }` slots. The bytecode and defaults live on a reference-counted `HookDefinition` ([docs](https://xahau.network/docs/protocol-reference/ledger-data/ledger-objects-types/hook-definition/)). Snapshot indexes both from `ledger_data`. Live `SetHook` creates / replaces / deletes them. Store `code_size`, not `CreateCode`. `AccountRoot` does not carry the hook array. HookOn bitmasks are decoded to `triggers` (`all_except` / `only` / `none`) at read time. Empty slots are dropped. `label` is applied at read time from `src/util/hookLabels.ts`: hash first, then the four stable Evernode accounts if governance rotated the WASM. Do not invent hashes — update the catalog from a live `account_objects type=hook` read.
 
 ### Issuers + TOML
 
@@ -318,6 +320,30 @@ CREATE TABLE hook_accounts (
 );
 ```
 
+### `hook_definitions`
+
+```sql
+CREATE TABLE hook_definitions (
+  hook_hash         TEXT PRIMARY KEY,
+  hook_namespace    TEXT,
+  hook_on           TEXT,
+  hook_on_incoming  TEXT,
+  hook_on_outgoing  TEXT,
+  hook_can_emit     TEXT,
+  hook_name         TEXT,
+  hook_api_version  INTEGER,
+  parameters_json   TEXT NOT NULL DEFAULT '[]',
+  reference_count   INTEGER,
+  code_size         INTEGER NOT NULL DEFAULT 0,
+  hook_fee          TEXT,
+  hook_callback_fee TEXT,
+  hook_set_txn_id   TEXT,
+  flags             INTEGER,
+  first_ledger      INTEGER NOT NULL,
+  last_updated      INTEGER NOT NULL
+);
+```
+
 ### `dex_trades`
 
 ```sql
@@ -394,6 +420,8 @@ CREATE INDEX ohlcv_pair_period ON ohlcv_candles(
 { "error": { "code": "NOT_FOUND", "message": "Token USD/rHb9… not found" } }
 ```
 
+`/docs`, `/docs/cookbook.md`, and the README cookbook section are generated from `docs/openapi.yaml` (`x-docs`, `x-cookbook`, and response `examples`). Run `npm run docs:sync` after editing the spec.
+
 ### Identifiers
 
 - Token: `/v1/tokens/{currency}/{issuer}`
@@ -427,7 +455,7 @@ Streams: `tokens`, `uritokens`, `prices`, `hooks`.
 Optional. Off unless `API_RATE_LIMIT_MAX` is a positive integer. Still no API keys.
 
 - Key is `request.ip`. `API_TRUST_PROXY` must stay false on a public bind so clients cannot spoof `X-Forwarded-For`.
-- Same HTTP bucket for REST, `/docs`, OpenAPI, unknown routes, and the WebSocket upgrade.
+- Same HTTP bucket for REST, unknown routes, and the WebSocket upgrade. `/`, `/docs`, `/docs/*`, and `/v1/openapi.yaml` are excluded so browsing the docs page does not consume the quota.
 - Over limit: `429` `{ error: { code: "RATE_LIMITED", message: "Too many requests" } }` plus `Retry-After`.
 - `API_WS_MAX_PER_IP` caps concurrent `/v1/subscribe` sockets per IP (default 8 when the HTTP limiter is on).
 - In-memory only. Ingest / snapshot / xahaud quota are separate.

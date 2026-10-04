@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { afterEach, describe, it } from 'node:test';
 
 import { buildApi } from '../../src/api/index.js';
+import { isDocsPath } from '../../src/api/rateLimit.js';
 import { closeDatabase, openDatabase, type SqliteDatabase } from '../../src/db/client.js';
 import { testConfig, testRuntime } from '../helpers.js';
 
@@ -25,6 +26,18 @@ async function appWith(overrides: Parameters<typeof testConfig>[0] = {}) {
 }
 
 describe('operator API rate limit', () => {
+  it('treats the docs page and its assets as documentation paths', () => {
+    assert.equal(isDocsPath('/'), true);
+    assert.equal(isDocsPath('/docs'), true);
+    assert.equal(isDocsPath('/docs/docs.css'), true);
+    assert.equal(isDocsPath('/docs/xi.svg'), true);
+    assert.equal(isDocsPath('/docs/favicon.svg'), true);
+    assert.equal(isDocsPath('/favicon.svg'), true);
+    assert.equal(isDocsPath('/v1/openapi.yaml?download=1'), true);
+    assert.equal(isDocsPath('/v1/status'), false);
+    assert.equal(isDocsPath('/v1/tokens'), false);
+  });
+
   it('stays unlimited when the max is unset', async () => {
     const app = await appWith();
     for (let i = 0; i < 5; i += 1) {
@@ -44,6 +57,23 @@ describe('operator API rate limit', () => {
       error: { code: 'RATE_LIMITED', message: 'Too many requests' },
     });
     assert.ok(limited.headers['retry-after']);
+    await app.close();
+  });
+
+  it('does not count or block documentation routes', async () => {
+    const app = await appWith({ apiRateLimitMax: 1, apiRateLimitWindowMs: 60_000 });
+    assert.equal((await app.inject({ method: 'GET', url: '/docs' })).statusCode, 200);
+    assert.equal((await app.inject({ method: 'GET', url: '/docs/docs.css' })).statusCode, 200);
+    assert.equal((await app.inject({ method: 'GET', url: '/docs/xi.svg' })).statusCode, 200);
+    assert.equal((await app.inject({ method: 'GET', url: '/docs/favicon.svg' })).statusCode, 200);
+    assert.equal((await app.inject({ method: 'GET', url: '/favicon.svg' })).statusCode, 200);
+    assert.equal((await app.inject({ method: 'GET', url: '/docs/cookbook.md' })).statusCode, 200);
+    assert.equal((await app.inject({ method: 'GET', url: '/v1/openapi.yaml' })).statusCode, 200);
+    assert.equal((await app.inject({ method: 'GET', url: '/' })).statusCode, 200);
+    assert.equal((await app.inject({ method: 'GET', url: '/v1/status' })).statusCode, 200);
+    const limited = await app.inject({ method: 'GET', url: '/v1/tokens' });
+    assert.equal(limited.statusCode, 429);
+    assert.equal((await app.inject({ method: 'GET', url: '/docs' })).statusCode, 200);
     await app.close();
   });
 

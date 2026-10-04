@@ -116,6 +116,26 @@ export interface HookAccountRow {
   last_updated: number;
 }
 
+export interface HookDefinitionRow {
+  hook_hash: string;
+  hook_namespace: string | null;
+  hook_on: string | null;
+  hook_on_incoming: string | null;
+  hook_on_outgoing: string | null;
+  hook_can_emit: string | null;
+  hook_name: string | null;
+  hook_api_version: number | null;
+  parameters_json: string;
+  reference_count: number | null;
+  code_size: number;
+  hook_fee: string | null;
+  hook_callback_fee: string | null;
+  hook_set_txn_id: string | null;
+  flags: number | null;
+  first_ledger: number;
+  last_updated: number;
+}
+
 export interface DexTradeRow {
   id: number;
   base_currency: string;

@@ -1,9 +1,21 @@
 import rateLimit from '@fastify/rate-limit';
-import type { FastifyInstance } from 'fastify';
+import type { FastifyInstance, FastifyRequest } from 'fastify';
 
 import { resolveWsMaxPerIp, type Config } from '../config.js';
 import { createIpAllowlist } from '../util/allowlist.js';
 import { rateLimited } from './errors.js';
+
+export function isDocsPath(url: string): boolean {
+  const path = url.split('?')[0] ?? '';
+  return (
+    path === '/' ||
+    path === '/docs' ||
+    path === '/docs/' ||
+    path.startsWith('/docs/') ||
+    path === '/favicon.svg' ||
+    path === '/v1/openapi.yaml'
+  );
+}
 
 export async function registerApiRateLimit(app: FastifyInstance, config: Config): Promise<void> {
   const max = config.apiRateLimitMax;
@@ -16,7 +28,7 @@ export async function registerApiRateLimit(app: FastifyInstance, config: Config)
     global: true,
     max,
     timeWindow: config.apiRateLimitWindowMs,
-    allowList: (request) => allowed(request.ip),
+    allowList: (request: FastifyRequest) => allowed(request.ip) || isDocsPath(request.url),
     skipOnError: true,
     errorResponseBuilder: () => rateLimited(),
   });

@@ -155,16 +155,62 @@ export interface HookGrant {
   hook_hash?: string;
 }
 
+export interface HookTriggerMask {
+  raw: string;
+  mode: 'all_except' | 'only' | 'none';
+  types: string[];
+}
+
+export interface HookLabel {
+  name: string;
+  project: string;
+  description: string;
+  url: string;
+  source: 'catalog';
+}
+
+export interface HookDefinition {
+  hook_hash: string;
+  hook_namespace?: string | null;
+  hook_on?: string | null;
+  hook_on_incoming?: string | null;
+  hook_on_outgoing?: string | null;
+  hook_can_emit?: string | null;
+  hook_name?: string | null;
+  hook_api_version?: number | null;
+  parameters?: HookParameter[];
+  reference_count?: number | null;
+  code_size: number;
+  hook_fee?: string | null;
+  hook_callback_fee?: string | null;
+  hook_set_txn_id?: string | null;
+  flags?: number | null;
+  triggers?: HookTriggerMask | null;
+  triggers_incoming?: HookTriggerMask | null;
+  triggers_outgoing?: HookTriggerMask | null;
+  can_emit?: HookTriggerMask | null;
+  first_ledger?: number;
+  last_updated?: number;
+  label?: HookLabel | null;
+}
+
 export interface HookEntry {
   hook_hash: string;
   hook_on?: string | null;
   hook_on_incoming?: string | null;
   hook_on_outgoing?: string | null;
+  hook_can_emit?: string | null;
   hook_namespace?: string | null;
   hook_name?: string | null;
   hook_api_version?: number | null;
   parameters?: HookParameter[];
   grants?: HookGrant[];
+  triggers?: HookTriggerMask | null;
+  triggers_incoming?: HookTriggerMask | null;
+  triggers_outgoing?: HookTriggerMask | null;
+  can_emit?: HookTriggerMask | null;
+  definition?: HookDefinition | null;
+  label?: HookLabel | null;
 }
 
 export interface HookState {

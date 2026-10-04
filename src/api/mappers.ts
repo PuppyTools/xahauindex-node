@@ -1,10 +1,26 @@
-import type { DexTrade, HookState, Issuer, OHLCVCandle, Token, TrustLine, URIToken } from '../types/api.js';
+import type {
+  DexTrade,
+  HookDefinition,
+  HookEntry,
+  HookParameter,
+  HookState,
+  Issuer,
+  OHLCVCandle,
+  Token,
+  TrustLine,
+  URIToken,
+} from '../types/api.js';
+import type { SqliteDatabase } from '../db/client.js';
+import { listHookDefinitionsByHashes } from '../db/queries/hooks.js';
 import { parseStoredTomlLinks } from '../util/domain.js';
+import { labelForHook } from '../util/hookLabels.js';
+import { decodeHookOn } from '../util/hookOn.js';
 import { metadataFromRow } from '../util/icon.js';
 import { classifyUri, resolveUriTokenMetadata } from '../util/uriPayload.js';
 import type {
   DexTradeRow,
   HookAccountRow,
+  HookDefinitionRow,
   IssuerRow,
   OhlcvCandleRow,
   TokenRow,
@@ -139,18 +155,95 @@ export function tradeFromRow(row: DexTradeRow): DexTrade {
   };
 }
 
-export function hookStateFromRow(row: HookAccountRow): HookState {
-  let hooks: HookState['hooks'];
+function parseHookParameters(raw: string): HookParameter[] {
   try {
-    hooks = JSON.parse(row.hooks_json) as HookState['hooks'];
+    const value = JSON.parse(raw) as unknown;
+    return Array.isArray(value) ? (value as HookParameter[]) : [];
+  } catch {
+    return [];
+  }
+}
+
+export function hookDefinitionFromRow(row: HookDefinitionRow): HookDefinition {
+  return {
+    hook_hash: row.hook_hash,
+    hook_namespace: row.hook_namespace,
+    hook_on: row.hook_on,
+    hook_on_incoming: row.hook_on_incoming,
+    hook_on_outgoing: row.hook_on_outgoing,
+    hook_can_emit: row.hook_can_emit,
+    hook_name: row.hook_name,
+    hook_api_version: row.hook_api_version,
+    parameters: parseHookParameters(row.parameters_json),
+    reference_count: row.reference_count,
+    code_size: row.code_size,
+    hook_fee: row.hook_fee,
+    hook_callback_fee: row.hook_callback_fee,
+    hook_set_txn_id: row.hook_set_txn_id,
+    flags: row.flags,
+    triggers: decodeHookOn(row.hook_on),
+    triggers_incoming: decodeHookOn(row.hook_on_incoming),
+    triggers_outgoing: decodeHookOn(row.hook_on_outgoing),
+    can_emit: decodeHookOn(row.hook_can_emit),
+    first_ledger: row.first_ledger,
+    last_updated: row.last_updated,
+    label: labelForHook({ hookHash: row.hook_hash }),
+  };
+}
+
+function enrichHookEntry(
+  entry: HookEntry,
+  definitionRow: HookDefinitionRow | undefined,
+  account: string,
+): HookEntry {
+  const definition = definitionRow === undefined ? undefined : hookDefinitionFromRow(definitionRow);
+  const hookOn = entry.hook_on ?? definition?.hook_on ?? null;
+  const incoming = entry.hook_on_incoming ?? definition?.hook_on_incoming ?? null;
+  const outgoing = entry.hook_on_outgoing ?? definition?.hook_on_outgoing ?? null;
+  const canEmit = entry.hook_can_emit ?? definition?.hook_can_emit ?? null;
+  return {
+    ...entry,
+    triggers: decodeHookOn(hookOn),
+    triggers_incoming: decodeHookOn(incoming),
+    triggers_outgoing: decodeHookOn(outgoing),
+    can_emit: decodeHookOn(canEmit),
+    definition: definition ?? null,
+    label: labelForHook({ hookHash: entry.hook_hash, account }),
+  };
+}
+
+export function hookStateFromRow(
+  row: HookAccountRow,
+  definitions?: ReadonlyMap<string, HookDefinitionRow>,
+): HookState {
+  let hooks: HookEntry[];
+  try {
+    hooks = JSON.parse(row.hooks_json) as HookEntry[];
   } catch {
     hooks = [];
   }
   return {
     account: row.account,
     hook_count: row.hook_count,
-    hooks,
+    hooks: hooks.map((entry) =>
+      enrichHookEntry(
+        entry,
+        definitions?.get(entry.hook_hash.toUpperCase()) ?? definitions?.get(entry.hook_hash),
+        row.account,
+      ),
+    ),
     first_ledger: row.first_ledger,
     last_updated: row.last_updated,
   };
+}
+
+export function hookStateFromDb(db: SqliteDatabase, row: HookAccountRow): HookState {
+  let hashes: string[] = [];
+  try {
+    const hooks = JSON.parse(row.hooks_json) as HookEntry[];
+    hashes = hooks.map((entry) => entry.hook_hash.toUpperCase()).filter((hash) => hash !== '');
+  } catch {
+    // keep empty
+  }
+  return hookStateFromRow(row, listHookDefinitionsByHashes(db, hashes));
 }

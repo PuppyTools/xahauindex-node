@@ -83,6 +83,35 @@ export interface HookEntry {
   Hook?: HookFields;
 }
 
+export interface HookObject {
+  LedgerEntryType: 'Hook';
+  index?: string;
+  Account: AccountAddress;
+  Hooks: HookEntry[];
+  Flags?: number;
+  PreviousTxnLgrSeq?: number;
+}
+
+export interface HookDefinitionObject {
+  LedgerEntryType: 'HookDefinition';
+  index?: string;
+  HookHash: HexString;
+  HookNamespace?: HexString;
+  HookOn?: HexString;
+  HookOnIncoming?: HexString;
+  HookOnOutgoing?: HexString;
+  HookCanEmit?: HexString;
+  HookName?: HexString;
+  HookApiVersion?: number;
+  HookParameters?: HookParameter[] | HookParameter;
+  CreateCode?: HexString;
+  HookSetTxnID?: HexString;
+  ReferenceCount?: string | number;
+  Fee?: string;
+  HookCallbackFee?: string;
+  Flags?: number;
+}
+
 export interface AccountRootObject {
   LedgerEntryType: 'AccountRoot';
   index?: string;
@@ -93,7 +122,8 @@ export interface AccountRootObject {
   EmailHash?: HexString;
   TransferRate?: number;
   RegularKey?: AccountAddress;
-  Hook?: HookEntry[];
+  HookNamespaces?: HexString[];
+  HookStateCount?: number;
   Remarks?: LedgerRemark[];
   PreviousTxnLgrSeq?: number;
 }
@@ -107,6 +137,8 @@ export type LedgerObject =
   | URITokenObject
   | RippleStateObject
   | AccountRootObject
+  | HookObject
+  | HookDefinitionObject
   | UnknownLedgerObject;
 
 export interface CreatedNode {
@@ -260,6 +292,14 @@ export function isRippleState(object: LedgerObject): object is RippleStateObject
 
 export function isAccountRoot(object: LedgerObject): object is AccountRootObject {
   return object.LedgerEntryType === 'AccountRoot';
+}
+
+export function isHookObject(object: LedgerObject): object is HookObject {
+  return object.LedgerEntryType === 'Hook';
+}
+
+export function isHookDefinition(object: LedgerObject): object is HookDefinitionObject {
+  return object.LedgerEntryType === 'HookDefinition';
 }
 
 export function isIssuedAmount(amount: Amount): amount is IssuedAmount {

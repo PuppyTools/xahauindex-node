@@ -121,7 +121,9 @@ Live-only ingest cannot serve wallets or explorers. On an empty DB:
    |-------------------|--------|
    | `RippleState` | Upsert `trust_lines` + parent `tokens` / `issuers`; store remarks |
    | `URIToken` | Upsert `uri_tokens` + remarks; record mint ledger from `PreviousTxnLgrSeq` if that is all we have |
-   | `AccountRoot` | Upsert `issuers` if Domain / flags / later referenced; upsert `hook_accounts` if `Hook` array present; store remarks |
+   | `AccountRoot` | Upsert `issuers` if Domain / flags / later referenced; store remarks |
+   | `Hook` | Upsert `hook_accounts` + `issuers.has_hooks` from `Account` + `Hooks` |
+   | `HookDefinition` | Upsert `hook_definitions` (defaults + `code_size`, never WASM) |
    | everything else | Ignore for v1 (except `SetRemarks` later) |
 
 5. After the walk, recompute token aggregates (`holder_count`, `trust_count`, `supply`) from `trust_lines`.
@@ -195,7 +197,7 @@ v1 snapshot + live persist remarks for `URIToken`, `AccountRoot`, `RippleState`.
 
 ### Hooks (`hooks.ts`)
 
-Watch `SetHook` and AccountRoot `Hook` diffs from snapshot / `account_info`.
+Watch `SetHook` metadata (`LedgerEntryType: Hook` and `HookDefinition`) and snapshot those objects. Do not read a hook array off `AccountRoot`. Store definition defaults and `code_size`, never `CreateCode`. Attach `label` at read time from `src/util/hookLabels.ts` (hash first, then Evernode system account).
 
 Persist the full hook array as JSON **and** keep these fields per entry when present:
 
@@ -271,6 +273,8 @@ Contract: `docs/openapi.yaml`. Envelope and errors unchanged.
 | GET | `/v1/trades/{base}/{counter}` | Same range params; raw tape for DEX UIs |
 | GET | `/v1/hooks` | Optional `hook_hash` |
 | GET | `/v1/hooks/{account}` | |
+| GET | `/v1/hooks/definitions` | |
+| GET | `/v1/hooks/definitions/{hook_hash}` | |
 | WS | `/v1/subscribe` | streams: `tokens`, `uritokens`, `prices`, `hooks` |
 
 CORS: `origin: true` (reflect request origin) or `*`. No auth plugin. Optional `@fastify/rate-limit` when `API_RATE_LIMIT_MAX` is set.

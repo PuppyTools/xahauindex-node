@@ -23,6 +23,8 @@ WORKDIR /app
 COPY --from=build /app/node_modules ./node_modules
 COPY --from=build /app/dist ./dist
 COPY --from=build /app/package.json ./
+COPY --from=build /app/public ./public
+COPY --from=build /app/docs/openapi.yaml ./docs/openapi.yaml
 
 ENV NODE_ENV=production
 ENV DB_PATH=/data/xahauindex.db

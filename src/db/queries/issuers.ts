@@ -41,6 +41,20 @@ export function updateIssuerOnChain(
   ).run(row);
 }
 
+export function setIssuerHasHooks(
+  db: SqliteDatabase,
+  account: string,
+  hasHooks: 0 | 1,
+  ledger: number,
+): void {
+  ensureIssuer(db, account, ledger);
+  db.prepare('UPDATE issuers SET has_hooks = ?, last_updated = ? WHERE account = ?').run(
+    hasHooks,
+    ledger,
+    account,
+  );
+}
+
 export function getIssuer(db: SqliteDatabase, account: string): IssuerRow | undefined {
   return db.prepare('SELECT * FROM issuers WHERE account = ?').get(account) as IssuerRow | undefined;
 }

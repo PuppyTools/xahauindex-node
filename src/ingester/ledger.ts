@@ -122,7 +122,7 @@ export function applyClosedLedger(
                   : 'update';
           uriTokenEvents.push({ id: node.index, event });
         }
-        if (node.type === 'AccountRoot' && (node.kind === 'created' || 'Hook' in node.fields)) {
+        if (node.type === 'Hook') {
           const account = node.fields.Account;
           if (typeof account === 'string') {
             hookAccounts.add(account);
