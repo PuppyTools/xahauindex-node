@@ -1,0 +1,973 @@
+openapi: 3.1.0
+
+info:
+  title: XahauIndex API
+  version: 1.0.0
+  description: |
+    Self-hostable metadata indexer for the Xahau network.
+    Covers IOU tokens, URITokens, issuer profiles, DEX prices, and Hook activity.
+
+    Token URLs use two path segments: `/v1/tokens/{currency}/{issuer}`.
+    Pair URLs use `/v1/prices/{base}/{counter}` with issuer query params.
+    Native asset code is `XAH`.
+  contact:
+    url: https://github.com/PuppyTools/xahauindex-node
+  license:
+    name: MIT
+
+servers:
+  - url: http://localhost:3000
+    description: Local instance
+
+tags:
+  - name: tokens
+    description: IOU token metadata, remarks, and trust-line statistics
+  - name: uritokens
+    description: URIToken (Xahau native NFT) metadata and lifecycle
+  - name: issuers
+    description: Issuer profiles with domain verification and remarks
+  - name: prices
+    description: DEX-derived historical OHLCV and trade tape
+  - name: hooks
+    description: Hook activity per account
+  - name: status
+    description: Indexer health, snapshot, and sync status
+
+components:
+  parameters:
+    page:
+      name: page
+      in: query
+      schema:
+        type: integer
+        minimum: 1
+        default: 1
+    per_page:
+      name: per_page
+      in: query
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 100
+        default: 20
+    sort_tokens:
+      name: sort
+      in: query
+      schema:
+        type: string
+        enum: [holder_count, trust_count, first_ledger]
+        default: holder_count
+    currency:
+      name: currency
+      in: path
+      required: true
+      description: 3-character currency code or 40-character hex
+      schema:
+        type: string
+    issuer:
+      name: issuer
+      in: path
+      required: true
+      description: Issuer r-address
+      schema:
+        type: string
+    base:
+      name: base
+      in: path
+      required: true
+      description: Base currency code (`XAH` or IOU code / hex)
+      schema:
+        type: string
+    counter:
+      name: counter
+      in: path
+      required: true
+      description: Counter currency code (`XAH` or IOU code / hex)
+      schema:
+        type: string
+    base_issuer:
+      name: base_issuer
+      in: query
+      description: Required when `base` is not `XAH`
+      schema:
+        type: string
+    counter_issuer:
+      name: counter_issuer
+      in: query
+      description: Required when `counter` is not `XAH`
+      schema:
+        type: string
+    from:
+      name: from
+      in: query
+      description: Inclusive unix timestamp (seconds)
+      schema:
+        type: integer
+        minimum: 0
+    to:
+      name: to
+      in: query
+      description: Exclusive unix timestamp (seconds)
+      schema:
+        type: integer
+        minimum: 0
+    from_ledger:
+      name: from_ledger
+      in: query
+      description: Inclusive ledger index
+      schema:
+        type: integer
+        minimum: 1
+    to_ledger:
+      name: to_ledger
+      in: query
+      description: Inclusive ledger index
+      schema:
+        type: integer
+        minimum: 1
+    range_limit:
+      name: limit
+      in: query
+      description: Max rows when no range is given (or cap when a range is given)
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 500
+        default: 100
+
+  schemas:
+    Meta:
+      type: object
+      required: [ledger_index]
+      properties:
+        count:
+          type: integer
+        page:
+          type: integer
+        per_page:
+          type: integer
+        ledger_index:
+          type: integer
+          description: Ledger index at time of response
+        history_start_ledger:
+          type: integer
+          description: First live ledger this node indexed (price history starts here)
+
+    Error:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: object
+          required: [code, message]
+          properties:
+            code:
+              type: string
+              example: NOT_FOUND
+            message:
+              type: string
+
+    Remarks:
+      type: object
+      additionalProperties:
+        type: string
+      description: Decoded remark name/value map
+
+    Token:
+      type: object
+      required: [id, currency, issuer, holder_count, trust_count, domain_verified, blackholed, first_ledger]
+      properties:
+        id:
+          type: string
+          description: Internal id `currency:issuer`
+          example: "USD:rHb9CJAWyB4rj91VRWn96DkukG4bwdtyTh"
+        currency:
+          type: string
+          example: "USD"
+        currency_hex:
+          type: string
+          nullable: true
+        issuer:
+          type: string
+        name:
+          type: string
+          nullable: true
+        description:
+          type: string
+          nullable: true
+        icon_url:
+          type: string
+          nullable: true
+        website_url:
+          type: string
+          nullable: true
+        supply:
+          type: string
+          nullable: true
+        holder_count:
+          type: integer
+        trust_count:
+          type: integer
+        domain_verified:
+          type: boolean
+        blackholed:
+          type: boolean
+        first_ledger:
+          type: integer
+        last_updated:
+          type: integer
+        remarks:
+          $ref: '#/components/schemas/Remarks'
+
+    TokenDetail:
+      allOf:
+        - $ref: '#/components/schemas/Token'
+        - type: object
+          properties:
+            issuer_profile:
+              $ref: '#/components/schemas/Issuer'
+            price:
+              nullable: true
+              allOf:
+                - $ref: '#/components/schemas/PriceSummary'
+
+    TrustLine:
+      type: object
+      required: [account, currency, issuer, balance]
+      properties:
+        account:
+          type: string
+        currency:
+          type: string
+        issuer:
+          type: string
+        balance:
+          type: string
+        limit_peer:
+          type: string
+        flags:
+          type: integer
+          nullable: true
+        remarks:
+          $ref: '#/components/schemas/Remarks'
+
+    URIToken:
+      type: object
+      required: [id, issuer, owner, burned, mint_ledger]
+      properties:
+        id:
+          type: string
+          description: URITokenID (64-char hex)
+        uri:
+          type: string
+          nullable: true
+        uri_raw:
+          type: string
+        digest:
+          type: string
+          nullable: true
+        issuer:
+          type: string
+        owner:
+          type: string
+        flags:
+          type: integer
+          nullable: true
+        sell_offer:
+          nullable: true
+          oneOf:
+            - type: string
+              description: XAH amount in drops
+            - type: object
+              required: [value, currency, issuer]
+              properties:
+                value:
+                  type: string
+                currency:
+                  type: string
+                issuer:
+                  type: string
+        destination:
+          type: string
+          nullable: true
+          description: Restricted buyer on the active sell offer
+        burned:
+          type: boolean
+        burn_ledger:
+          type: integer
+          nullable: true
+        mint_ledger:
+          type: integer
+        last_updated:
+          type: integer
+        remarks:
+          $ref: '#/components/schemas/Remarks'
+        transfer_count:
+          type: integer
+
+    URITokenDetail:
+      allOf:
+        - $ref: '#/components/schemas/URIToken'
+        - type: object
+          properties:
+            transfers:
+              type: array
+              items:
+                $ref: '#/components/schemas/URITokenTransfer'
+
+    URITokenTransfer:
+      type: object
+      required: [from_account, to_account, ledger_index, tx_hash]
+      properties:
+        from_account:
+          type: string
+        to_account:
+          type: string
+        price:
+          type: string
+          nullable: true
+        ledger_index:
+          type: integer
+        tx_hash:
+          type: string
+
+    Issuer:
+      type: object
+      required: [account, domain_verified, has_hooks, first_ledger]
+      properties:
+        account:
+          type: string
+        domain:
+          type: string
+          nullable: true
+        domain_verified:
+          type: boolean
+        email_hash:
+          type: string
+          nullable: true
+        transfer_rate:
+          type: integer
+          nullable: true
+        flags:
+          type: integer
+          nullable: true
+        blackholed:
+          type: boolean
+        toml_name:
+          type: string
+          nullable: true
+        toml_description:
+          type: string
+          nullable: true
+        toml_icon_url:
+          type: string
+          nullable: true
+        has_hooks:
+          type: boolean
+        token_count:
+          type: integer
+        first_ledger:
+          type: integer
+        last_updated:
+          type: integer
+        remarks:
+          $ref: '#/components/schemas/Remarks'
+
+    IssuerDetail:
+      allOf:
+        - $ref: '#/components/schemas/Issuer'
+        - type: object
+          properties:
+            tokens:
+              type: array
+              items:
+                $ref: '#/components/schemas/Token'
+            hooks:
+              nullable: true
+              allOf:
+                - $ref: '#/components/schemas/HookState'
+
+    PriceSummary:
+      type: object
+      properties:
+        price:
+          type: number
+          description: Last trade price (counter per base)
+        change_24h:
+          type: number
+          nullable: true
+        volume_24h:
+          type: string
+          nullable: true
+        high_24h:
+          type: number
+          nullable: true
+        low_24h:
+          type: number
+          nullable: true
+
+    OHLCVCandle:
+      type: object
+      required: [open_time, open, high, low, close, volume, trade_count]
+      properties:
+        open_time:
+          type: integer
+        open_ledger:
+          type: integer
+          nullable: true
+        close_ledger:
+          type: integer
+          nullable: true
+        open:
+          type: number
+        high:
+          type: number
+        low:
+          type: number
+        close:
+          type: number
+        volume:
+          type: string
+        trade_count:
+          type: integer
+
+    DexTrade:
+      type: object
+      required: [price, base_amount, counter_amount, ledger_index, close_time, tx_hash]
+      properties:
+        base_currency:
+          type: string
+        base_issuer:
+          type: string
+          nullable: true
+        counter_currency:
+          type: string
+        counter_issuer:
+          type: string
+          nullable: true
+        price:
+          type: number
+        base_amount:
+          type: string
+        counter_amount:
+          type: string
+        taker:
+          type: string
+        maker:
+          type: string
+        ledger_index:
+          type: integer
+        close_time:
+          type: integer
+        tx_hash:
+          type: string
+
+    HookState:
+      type: object
+      required: [account, hook_count, hooks]
+      properties:
+        account:
+          type: string
+        hook_count:
+          type: integer
+        hooks:
+          type: array
+          items:
+            type: object
+            required: [hook_hash]
+            properties:
+              hook_hash:
+                type: string
+              hook_on:
+                type: string
+                nullable: true
+              hook_on_incoming:
+                type: string
+                nullable: true
+              hook_on_outgoing:
+                type: string
+                nullable: true
+              hook_namespace:
+                type: string
+                nullable: true
+              hook_name:
+                type: string
+                nullable: true
+              hook_api_version:
+                type: integer
+                nullable: true
+              parameters:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    name:
+                      type: string
+                    value:
+                      type: string
+              grants:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    account:
+                      type: string
+                    hook_hash:
+                      type: string
+        first_ledger:
+          type: integer
+        last_updated:
+          type: integer
+
+    Status:
+      type: object
+      required: [status, ledger_index, indexed_ledgers, uptime_seconds]
+      properties:
+        status:
+          type: string
+          enum: [syncing, live, degraded]
+        snapshot_status:
+          type: string
+          enum: [pending, running, complete]
+        snapshot_ledger:
+          type: integer
+          nullable: true
+        history_start_ledger:
+          type: integer
+          nullable: true
+          description: live_from_ledger — first ledger applied after snapshot
+        ledger_index:
+          type: integer
+        network_ledger_index:
+          type: integer
+          nullable: true
+        lag_ledgers:
+          type: integer
+          nullable: true
+        indexed_ledgers:
+          type: integer
+        token_count:
+          type: integer
+        uri_token_count:
+          type: integer
+        issuer_count:
+          type: integer
+        uptime_seconds:
+          type: integer
+
+paths:
+  /v1/status:
+    get:
+      operationId: getStatus
+      tags: [status]
+      summary: Indexer health, snapshot, and sync status
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/Status'
+                  meta:
+                    $ref: '#/components/schemas/Meta'
+
+  /v1/tokens:
+    get:
+      operationId: listTokens
+      tags: [tokens]
+      summary: List indexed IOU tokens
+      parameters:
+        - $ref: '#/components/parameters/page'
+        - $ref: '#/components/parameters/per_page'
+        - $ref: '#/components/parameters/sort_tokens'
+        - name: issuer
+          in: query
+          schema:
+            type: string
+        - name: currency
+          in: query
+          schema:
+            type: string
+        - name: domain_verified
+          in: query
+          schema:
+            type: boolean
+        - name: q
+          in: query
+          description: Search by name or currency
+          schema:
+            type: string
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Token'
+                  meta:
+                    $ref: '#/components/schemas/Meta'
+
+  /v1/tokens/{currency}/{issuer}:
+    get:
+      operationId: getToken
+      tags: [tokens]
+      summary: Single token with full metadata
+      parameters:
+        - $ref: '#/components/parameters/currency'
+        - $ref: '#/components/parameters/issuer'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/TokenDetail'
+                  meta:
+                    $ref: '#/components/schemas/Meta'
+        '404':
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /v1/tokens/{currency}/{issuer}/holders:
+    get:
+      operationId: listTokenHolders
+      tags: [tokens]
+      summary: Trust lines / holders for a token
+      parameters:
+        - $ref: '#/components/parameters/currency'
+        - $ref: '#/components/parameters/issuer'
+        - $ref: '#/components/parameters/page'
+        - $ref: '#/components/parameters/per_page'
+        - name: nonzero
+          in: query
+          description: If true, only balances that are not zero
+          schema:
+            type: boolean
+            default: true
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/TrustLine'
+                  meta:
+                    $ref: '#/components/schemas/Meta'
+        '404':
+          description: Token not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /v1/uritokens:
+    get:
+      operationId: listURITokens
+      tags: [uritokens]
+      summary: List URITokens with resolved metadata
+      parameters:
+        - $ref: '#/components/parameters/page'
+        - $ref: '#/components/parameters/per_page'
+        - name: sort
+          in: query
+          schema:
+            type: string
+            enum: [mint_ledger, last_updated]
+            default: mint_ledger
+        - name: issuer
+          in: query
+          schema:
+            type: string
+        - name: owner
+          in: query
+          schema:
+            type: string
+        - name: burned
+          in: query
+          schema:
+            type: boolean
+            default: false
+        - name: for_sale
+          in: query
+          schema:
+            type: boolean
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/URIToken'
+                  meta:
+                    $ref: '#/components/schemas/Meta'
+
+  /v1/uritokens/{id}:
+    get:
+      operationId: getURIToken
+      tags: [uritokens]
+      summary: Single URIToken with remarks and transfer history
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            pattern: '^[A-Fa-f0-9]{64}$'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/URITokenDetail'
+                  meta:
+                    $ref: '#/components/schemas/Meta'
+        '404':
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /v1/issuers:
+    get:
+      operationId: listIssuers
+      tags: [issuers]
+      summary: List issuer profiles
+      parameters:
+        - $ref: '#/components/parameters/page'
+        - $ref: '#/components/parameters/per_page'
+        - name: sort
+          in: query
+          schema:
+            type: string
+            enum: [token_count, first_ledger]
+            default: token_count
+        - name: domain_verified
+          in: query
+          schema:
+            type: boolean
+        - name: has_hooks
+          in: query
+          schema:
+            type: boolean
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Issuer'
+                  meta:
+                    $ref: '#/components/schemas/Meta'
+
+  /v1/issuers/{account}:
+    get:
+      operationId: getIssuer
+      tags: [issuers]
+      summary: Issuer profile with remarks, tokens, and Hook state
+      parameters:
+        - name: account
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/IssuerDetail'
+                  meta:
+                    $ref: '#/components/schemas/Meta'
+        '404':
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /v1/prices/{base}/{counter}:
+    get:
+      operationId: getPrices
+      tags: [prices]
+      summary: Historical OHLCV candles for a pair
+      description: |
+        Calendar-aligned UTC candles. History starts at `history_start_ledger`.
+
+        Examples:
+        - `/v1/prices/USD/XAH?base_issuer=rHb9…&period=1h&from=1717200000&to=1717286400`
+        - `/v1/prices/USD/EUR?base_issuer=rA…&counter_issuer=rB…&from_ledger=9000000&to_ledger=9001000`
+      parameters:
+        - $ref: '#/components/parameters/base'
+        - $ref: '#/components/parameters/counter'
+        - $ref: '#/components/parameters/base_issuer'
+        - $ref: '#/components/parameters/counter_issuer'
+        - name: period
+          in: query
+          schema:
+            type: string
+            enum: ['1h', '24h', '7d']
+            default: '24h'
+        - $ref: '#/components/parameters/from'
+        - $ref: '#/components/parameters/to'
+        - $ref: '#/components/parameters/from_ledger'
+        - $ref: '#/components/parameters/to_ledger'
+        - $ref: '#/components/parameters/range_limit'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/OHLCVCandle'
+                  meta:
+                    $ref: '#/components/schemas/Meta'
+        '400':
+          description: Missing issuer for an IOU side
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: Pair not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /v1/trades/{base}/{counter}:
+    get:
+      operationId: getTrades
+      tags: [prices]
+      summary: Executed DEX trades for a pair
+      parameters:
+        - $ref: '#/components/parameters/base'
+        - $ref: '#/components/parameters/counter'
+        - $ref: '#/components/parameters/base_issuer'
+        - $ref: '#/components/parameters/counter_issuer'
+        - $ref: '#/components/parameters/from'
+        - $ref: '#/components/parameters/to'
+        - $ref: '#/components/parameters/from_ledger'
+        - $ref: '#/components/parameters/to_ledger'
+        - $ref: '#/components/parameters/range_limit'
+        - $ref: '#/components/parameters/page'
+        - $ref: '#/components/parameters/per_page'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/DexTrade'
+                  meta:
+                    $ref: '#/components/schemas/Meta'
+        '404':
+          description: Pair not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /v1/hooks/{account}:
+    get:
+      operationId: getHooks
+      tags: [hooks]
+      summary: Hook state for a Xahau account
+      parameters:
+        - name: account
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/HookState'
+                  meta:
+                    $ref: '#/components/schemas/Meta'
+        '404':
+          description: Account has no indexed Hooks
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /v1/hooks:
+    get:
+      operationId: listHookAccounts
+      tags: [hooks]
+      summary: List accounts with active Hooks
+      parameters:
+        - $ref: '#/components/parameters/page'
+        - $ref: '#/components/parameters/per_page'
+        - name: hook_hash
+          in: query
+          schema:
+            type: string
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/HookState'
+                  meta:
+                    $ref: '#/components/schemas/Meta'
