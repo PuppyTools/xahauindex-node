@@ -23,16 +23,17 @@ servers:
 
 x-docs:
   kicker: Xahau network · self-hosted
-  headline: The missing data layer for wallets, explorers, and DEX UIs.
+  headline: Self-hostable data layer for your wallet, explorer, or dapp.
   lede: >
     XahauIndex snapshots the current ledger, follows it live, and serves enriched
     REST + WebSocket APIs for IOUs, URITokens, issuer profiles, DEX candles, and Hooks.
     No API key. Operators can turn on a per-IP rate limit. Put a reverse proxy in front if you want TLS.
-  chips:
-    - No auth
-    - Envelope `{ data, meta }`
-    - Native asset `XAH`
-    - OpenAPI 3.1
+  donate:
+    label: Donations in XAH
+    address: rPUPpkfohJsWVoXoXDbNZ7zKfk2FBB8Xwo
+  try:
+    title: Try this node
+    body: Feel free to test this instance. These are the limits on this process.
   conventions:
     - title: Response envelope
       body: >

@@ -141,15 +141,38 @@ h2 {
   line-height: 1.1;
 }
 .lede { color: var(--muted); font-size: 18px; max-width: 720px; }
-.chips { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 22px; }
-.chip {
-  border: 1px solid var(--line);
-  background: var(--panel);
+.donate {
+  margin: 18px 0 0;
   color: var(--text);
-  border-radius: 999px;
-  padding: 6px 12px;
-  font-size: 13px;
+  font-size: 14px;
 }
+.donate code {
+  color: var(--teal);
+}
+.try {
+  margin: 22px 0 0;
+  max-width: 720px;
+  padding: 16px 18px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--panel);
+}
+.try h3 {
+  margin: 0 0 6px;
+  font-size: 16px;
+}
+.try p {
+  margin: 0 0 10px;
+  color: var(--muted);
+  font-size: 14px;
+}
+.try ul {
+  margin: 0;
+  padding-left: 18px;
+  color: var(--text);
+  font-size: 14px;
+}
+.try li + li { margin-top: 4px; }
 section { margin: 56px 0; scroll-margin-top: 24px; }
 h3 {
   margin: 0 0 8px;

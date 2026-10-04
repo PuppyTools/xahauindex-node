@@ -8,7 +8,7 @@ import { loadOpenApi, loadOpenApiYaml, resolveAsset } from '../openapi.js';
 export const docsRoutes: FastifyPluginAsync = async (app) => {
   const openapiYaml = loadOpenApiYaml();
   const spec = loadOpenApi();
-  const html = renderDocsHtml(spec);
+  const html = renderDocsHtml(spec, app.config);
   const cookbook = renderCookbookMarkdown(spec);
   const css = readFileSync(resolveAsset('public/docs/docs.css'), 'utf8');
   const mark = readFileSync(resolveAsset('public/docs/xi.svg'));
