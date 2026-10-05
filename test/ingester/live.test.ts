@@ -170,12 +170,12 @@ describe('live subscribe gap', () => {
     assert.equal(nextLedgerToApply(db), 11);
   });
 
-  it('uses complete_ledgers so the live node fills the ledgers it still has', () => {
+  it('starts live at the current tip even when complete_ledgers is a short window', () => {
     const db = memoryDb();
     seedLiveFrom(db, 10);
     const gap = recordLiveSubscribeGap(db, 20, 16);
-    assert.deepEqual(gap, { from: 11, through: 15, next: 11 });
-    assert.equal(liveCatchUpFloor(db, 20, 16), 16);
+    assert.deepEqual(gap, { from: 11, through: 19, next: 11 });
+    assert.equal(liveCatchUpFloor(db, 20, 16), 20);
   });
 
   it('still records last-indexed → tip when complete_ledgers starts at genesis', () => {
@@ -201,11 +201,12 @@ describe('followLive', () => {
     const requested: number[] = [];
     const order: string[] = [];
     const handlers: Array<(ledger: ValidatedLedger) => void> = [];
+    let validated = 12;
     const source: LiveLedgerSource = {
       getValidatedLedger: async () => ({
-        index: 12,
+        index: validated,
         hash: 'a'.repeat(64),
-        closeTime: 1_700_000_012,
+        closeTime: 1_700_000_000 + validated,
       }),
       getLedgerDataPage: async () => ({ state: [] }),
       getLedgerWithTransactions: async (index) => {
@@ -243,13 +244,49 @@ describe('followLive', () => {
     assert.equal(runtime.networkLedgerIndex, 12);
     assert.deepEqual(readLiveGap(db), { from: 11, through: 11, next: 11 });
 
+    validated = 14;
     handlers[0]?.({ index: 14, hash: 'b'.repeat(64), closeTime: 1_700_000_014 });
-    await waitUntil(() => requested.length >= 3);
-    assert.deepEqual(requested, [12, 13, 14]);
+    await waitUntil(() => requested.includes(14));
+    assert.deepEqual(requested, [12, 14]);
     assert.equal(getLatestLedgerIndex(db), 14);
+    assert.deepEqual(readLiveGap(db), { from: 11, through: 13, next: 11 });
 
     controller.abort();
     await running;
+  });
+
+  it('asks the node for the current ledger and does not walk the complete_ledgers window', async () => {
+    const db = memoryDb();
+    seedLiveFrom(db, 10);
+    const requested: number[] = [];
+    const source: LiveLedgerSource = {
+      getValidatedLedger: async () => ({
+        index: 20,
+        hash: 'a'.repeat(64),
+        closeTime: 1_700_000_020,
+      }),
+      getCompleteLedgers: async () => '16-20',
+      getLedgerDataPage: async () => ({ state: [] }),
+      getLedgerWithTransactions: async (index) => {
+        requested.push(index);
+        return emptyLedger(index);
+      },
+      subscribeLedgers: async () => undefined,
+      onLedgerClosed: () => () => undefined,
+    };
+    const controller = new AbortController();
+    const running = followLive({
+      db,
+      source,
+      runtime: testRuntime(),
+      log: silentLog,
+      signal: controller.signal,
+    });
+    await waitUntil(() => requested.length >= 1);
+    controller.abort();
+    await running;
+    assert.deepEqual(requested, [20]);
+    assert.deepEqual(readLiveGap(db), { from: 11, through: 19, next: 11 });
   });
 
   it('retries subscribe after a public-node rate limit', async () => {
