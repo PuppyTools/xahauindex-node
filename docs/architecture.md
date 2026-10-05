@@ -430,6 +430,7 @@ CREATE INDEX ohlcv_pair_period ON ohlcv_candles(
 
 - Token: `/v1/tokens/{currency}/{issuer}`
 - Pair: `/v1/prices/{base}/{counter}?base_issuer=&counter_issuer=`
+- Trades for one asset: `/v1/trades/{currency}` (`issuer` / `base_issuer` when not XAH)
 - Native currency code: `XAH`
 
 ### Pagination

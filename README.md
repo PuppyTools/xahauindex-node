@@ -122,7 +122,8 @@ Token and pair identifiers use **separate path segments** (no `:` or `+` in one 
 | GET | `/v1/issuers` | List issuers |
 | GET | `/v1/issuers/{account}` | Issuer profile |
 | GET | `/v1/prices/{base}/{counter}` | OHLCV candles (`from` / `to` / ledger range) |
-| GET | `/v1/trades/{base}/{counter}` | Executed DEX trades |
+| GET | `/v1/trades/{base}/{counter}` | Executed DEX trades for a pair |
+| GET | `/v1/trades/{currency}` | Executed DEX trades that include that asset |
 | GET | `/v1/hooks` | Accounts with Hooks |
 | GET | `/v1/hooks/{account}` | Hook state (`label` + `triggers` + `definition`) |
 | GET | `/v1/hooks/definitions` | HookDefinition catalog |
@@ -193,6 +194,14 @@ curl -s 'http://localhost:3000/v1/prices/USD/XAH?base_issuer=rHb9CJAWyB4rj91VRWn
 
 ```bash
 curl -s 'http://localhost:3000/v1/trades/USD/XAH?base_issuer=rHb9CJAWyB4rj91VRWn96DkukG4bwdtyTh&per_page=5'
+```
+
+## Trades for one currency
+
+Omit the counter to list every pair that includes that asset. IOUs need `issuer` (or `base_issuer`).
+
+```bash
+curl -s 'http://localhost:3000/v1/trades/XAH?per_page=5'
 ```
 
 ## Account hook state

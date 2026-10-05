@@ -2,7 +2,13 @@ import assert from 'node:assert/strict';
 import { afterEach, describe, it } from 'node:test';
 
 import { closeDatabase, openDatabase, type SqliteDatabase } from '../../src/db/client.js';
-import { listDexTrades, listOhlcvCandles } from '../../src/db/queries/dex.js';
+import {
+  countDexTradesForCurrency,
+  insertDexTrade,
+  listDexTrades,
+  listDexTradesForCurrency,
+  listOhlcvCandles,
+} from '../../src/db/queries/dex.js';
 import { applyClosedLedger } from '../../src/ingester/ledger.js';
 import { candleOpenTime } from '../../src/ingester/dex.js';
 import { silentLog } from '../helpers.js';
@@ -210,5 +216,43 @@ describe('DEX trades and candles', () => {
     );
     assert.equal(listDexTrades(db, pair, { limit: 10 }).length, 0);
     assert.equal(listOhlcvCandles(db, pair, { period: '1h', limit: 10 }).length, 0);
+  });
+
+  it('lists trades that include a currency on either side', () => {
+    const db = memoryDb();
+    insertDexTrade(db, {
+      base_currency: 'USD',
+      base_issuer: ISSUER,
+      counter_currency: 'XAH',
+      counter_issuer: null,
+      price: 1,
+      base_amount: '1',
+      counter_amount: '1',
+      taker: TAKER,
+      maker: MAKER,
+      ledger_index: 51,
+      close_time: HOUR,
+      tx_hash: '1'.repeat(64),
+    });
+    insertDexTrade(db, {
+      base_currency: 'EUR',
+      base_issuer: ISSUER,
+      counter_currency: 'USD',
+      counter_issuer: ISSUER,
+      price: 2,
+      base_amount: '2',
+      counter_amount: '1',
+      taker: TAKER,
+      maker: MAKER,
+      ledger_index: 52,
+      close_time: HOUR + 10,
+      tx_hash: '2'.repeat(64),
+    });
+    const xah = listDexTradesForCurrency(db, { currency: 'XAH', issuer: null }, { limit: 10 });
+    assert.equal(xah.length, 1);
+    assert.equal(xah[0]?.tx_hash, '1'.repeat(64));
+    const usd = listDexTradesForCurrency(db, { currency: 'USD', issuer: ISSUER }, { limit: 10 });
+    assert.equal(usd.length, 2);
+    assert.equal(countDexTradesForCurrency(db, { currency: 'EUR', issuer: ISSUER }, {}), 1);
   });
 });

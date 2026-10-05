@@ -147,6 +147,22 @@ describe('holders, prices, and trades routes', () => {
     assert.equal(trades.json().data.length, 1);
     assert.equal(trades.json().data[0].tx_hash, 'c'.repeat(64));
 
+    const allXah = await app.inject({ method: 'GET', url: '/v1/trades/XAH' });
+    assert.equal(allXah.statusCode, 200);
+    assert.equal(allXah.json().data.length, 2);
+    assert.equal(allXah.json().meta.count, 2);
+
+    const usd = await app.inject({ method: 'GET', url: `/v1/trades/USD?issuer=${ISSUER}` });
+    assert.equal(usd.statusCode, 200);
+    assert.equal(usd.json().data.length, 2);
+
+    const alias = await app.inject({ method: 'GET', url: `/v1/trades/USD?base_issuer=${ISSUER}` });
+    assert.equal(alias.statusCode, 200);
+    assert.equal(alias.json().data.length, 2);
+
+    const missingIssuer = await app.inject({ method: 'GET', url: '/v1/trades/USD' });
+    assert.equal(missingIssuer.statusCode, 400);
+
     const token = await app.inject({ method: 'GET', url: `/v1/tokens/USD/${ISSUER}` });
     // token row may not exist from offer-only ledgers
     assert.ok(token.statusCode === 200 || token.statusCode === 404);

@@ -28,6 +28,13 @@ function parseSide(currencyRaw: string, issuerRaw: string | undefined, label: st
   return { currency: decoded.currency, issuer: issuerRaw };
 }
 
+export function parseRequestedCurrency(
+  currencyRaw: string,
+  issuerRaw: string | undefined,
+): CurrencySide {
+  return parseSide(currencyRaw, issuerRaw, 'currency');
+}
+
 export function parseRequestedPair(
   base: string,
   counter: string,
