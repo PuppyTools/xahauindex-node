@@ -5,12 +5,12 @@
 XahauIndex has three layers: an **ingester** (snapshot + live WebSocket), a **SQLite database**, and a **Fastify API**. XahauIndex is an independent PuppyTools project — not affiliated with, endorsed by, or a product of the Xahau network or its operators. The XI mark is original artwork inspired by [Xahau/Graphics](https://github.com/Xahau/Graphics).
 
 ```
-┌─────────────────────────────────────────────────────────────────┐
+├────────────────────────────────────────────────────────────────┐
 │  xahaud node  (wss://xahau.network or self-hosted)              │
 └─────────────┬───────────────────────────────────┬───────────────┘
               │ ledger_data (first boot)          │ WS ledger + tx
               ▼                                   ▼
-┌─────────────────────────────────────────────────────────────────┐
+├────────────────────────────────────────────────────────────────┐
 │  Ingester  (src/ingester/)                                       │
 │  snapshot.ts   — page current validated ledger                   │
 │  ledger.ts     — one SQLite transaction per closed ledger        │
@@ -20,17 +20,17 @@ XahauIndex has three layers: an **ingester** (snapshot + live WebSocket), a **SQ
 │  remarks.ts    — Remarks decode + SetRemarks                     │
 │  issuers.ts    — AccountRoot + TOML (async worker)               │
 │  dex.ts        — executed offers → trades + calendar candles     │
-└──────────────────────────┬──────────────────────────────────────┘
+└─────────────────────────┬───────────────────────────────────────┘
                            │  better-sqlite3
                            ▼
-┌─────────────────────────────────────────────────────────────────┐
+├────────────────────────────────────────────────────────────────┐
 │  SQLite  (DB_PATH, default ./data/xahauindex.db)                 │
-└──────────────────────────┬──────────────────────────────────────┘
+└─────────────────────────┬───────────────────────────────────────┘
                            │  reads
                            ▼
-┌─────────────────────────────────────────────────────────────────┐
+├────────────────────────────────────────────────────────────────┐
 │  Fastify API  :API_PORT/docs (from openapi.yaml) + /v1/…         │
-└─────────────────────────────────────────────────────────────────┘
+└────────────────────────────────────────────────────────────────┘
 ```
 
 ---
@@ -41,9 +41,10 @@ XahauIndex has three layers: an **ingester** (snapshot + live WebSocket), a **SQ
 2. Connect `@transia/xrpl` `Client` to `XAHAUD_URL` (default mainnet).
 3. If `indexer_state.snapshot_status` is not `complete`, run the snapshot.
 4. Start the TOML worker and the URI metadata worker (icon URLs only).
-5. If `BACKFILL_FROM_LEDGER` or `BACKFILL_LOOKBACK` is set, walk closed ledgers `L..FROM` downward in history mode (DEX trades + URIToken transfers only). History fetches use `BACKFILL_XAHAUD_URL` or a second env file (`BACKFILL_ENV` / `.env.backfill`) when set, otherwise `XAHAUD_URL`. Resume via `backfill_next` (next lower ledger). Missing historical ledgers are retried, then skipped.
-6. Subscribe to `ledger`. Ignore live apply at or before `snapshot_ledger`. Live starts at `max(MAX(ledgers)+1, live_from_ledger)` and never below `L+1`.
-7. Listen on `API_HOST:API_PORT`. No auth. If `API_RATE_LIMIT_MAX` is set, apply an in-process per-IP HTTP limit and a `/v1/subscribe` connection cap. `/docs` cookbook curls, endpoint Open links, and `/v1/openapi.yaml` use `API_BASE_URL` (default `http://localhost:3000` when unset). Project site: `https://xahauindex.dev`.
+5. Subscribe to `ledger` on `XAHAUD_URL` at the current tip. Live catch-up starts at the live node's `complete_ledgers` floor (or the tip if that range is unknown), not last-indexed + 1. Ignore live apply at or before `snapshot_ledger`.
+6. If last-indexed is behind that floor, record a live gap and fill it forward on `BACKFILL_XAHAUD_URL` (or `XAHAUD_URL` if unset) with the same closed-ledger apply as live. Gap fill is paced (`BACKFILL_MIN_INTERVAL_MS`, default 2000ms) so a public history node is not exhausted.
+7. If `BACKFILL_FROM_LEDGER` or `BACKFILL_LOOKBACK` is set, then walk closed ledgers `L..FROM` downward in history mode (DEX trades + URIToken transfers only). History fetches use the same dedicated URL as the gap fill. Resume via `backfill_next` (next lower ledger). Missing historical ledgers are retried, then skipped.
+8. Listen on `API_HOST:API_PORT`. No auth. If `API_RATE_LIMIT_MAX` is set, apply an in-process per-IP HTTP limit and a `/v1/subscribe` connection cap. `/docs` cookbook curls, endpoint Open links, and `/v1/openapi.yaml` use `API_BASE_URL` (default `http://localhost:3000` when unset). Project site: `https://xahauindex.dev`.
 
 ### Snapshot
 
@@ -68,17 +69,20 @@ Objects consumed during snapshot:
 ### Live stream
 
 - Reconnect with exponential backoff (1s → 60s).
-- On a gap, fill with `ledger` (`transactions: true`) before applying newer stream events.
+- Subscribe at the current tip first so a short-history live node stays usable.
+- Ledgers between last-indexed and the live node's `complete_ledgers` floor are a forward gap fill on the history node, not a live catch-up on `XAHAUD_URL`.
+- After subscribe, catch up only the ledgers the live node still has, then apply newer `ledgerClosed` events.
 - Process only validated `tesSUCCESS` transactions.
 - One SQLite transaction per ledger.
 - TOML HTTP is **never** inside that transaction.
 
 ### Historical backfill
 
-Optional. After snapshot, if `BACKFILL_FROM_LEDGER` (alias `FULL_HISTORY_START`; `genesis`/`start` → `1`) or `BACKFILL_LOOKBACK` is set, walk `snapshot_ledger` down to `FROM` inclusive.
+Optional backward walk. After snapshot and after the live-gap fill, if `BACKFILL_FROM_LEDGER` (alias `FULL_HISTORY_START`; `genesis`/`start` → `1`) or `BACKFILL_LOOKBACK` is set, walk `snapshot_ledger` down to `FROM` inclusive.
 
+- The live gap (last indexed → subscribe tip) is filled first, even when no backward bound is set.
 - Recent history is filled first. `genesis` keeps decrementing until ledger 1.
-- `FROM` wins when both are set. Neither set = no backfill.
+- `FROM` wins when both are set. Neither set = no backward walk.
 - History mode writes DEX trades (idempotent) and URIToken transfers. If the URIToken already exists from the snapshot, owner/offer/burn are left alone.
 - Missing tokens get a full apply, then a burn when the node is a `DeletedNode`.
 - RippleState, AccountRoot, SetRemarks, and SetHook are not applied.
