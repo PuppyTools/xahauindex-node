@@ -143,7 +143,7 @@ Copy `.env.example` to `.env`. Never commit `.env`.
 - `LOG_LEVEL` — `trace|debug|info|warn|error`
 - `BACKFILL_FROM_LEDGER` — optional earliest ledger the walk stops at (`genesis`/`start` = `1`). Alias: `FULL_HISTORY_START`.
 - `BACKFILL_LOOKBACK` — if `FROM` is unset, stop at `snapshot - lookback + 1`. Neither set = no backfill. Walk is snapshot → FROM.
-- `BACKFILL_XAHAUD_URL` — optional dedicated history node (`ws`/`wss` or `http`/`https` JSON-RPC). Unset = reuse `XAHAUD_URL`.
+- `BACKFILL_XAHAUD_URL` — optional dedicated history node (`ws`/`wss` or `http`/`https` JSON-RPC). Unset = reuse `XAHAUD_URL`. Live subscribe stays on `XAHAUD_URL` at the current tip; this node fills last-indexed → tip first, then walks backward.
 - `BACKFILL_ENV` — optional second env file for that node URL. Auto-loads `.env.backfill` when present.
 - `BACKFILL_MIN_INTERVAL_MS` — delay between historical fetches. Unset = `2000` when sharing the live node (public RPC quotas), `0` on a dedicated history URL. A shared node also gives live fetches priority and pauses backfill after `tooBusy`.
 - `API_RATE_LIMIT_MAX` — optional HTTP requests per IP per window. Unset / `0` = off. No API keys.
