@@ -35,20 +35,30 @@ function asBackfillStatus(value: string | undefined): BackfillStatus {
 }
 
 export function readHistoryStartLedger(db: SqliteDatabase): number | null {
+  const historyFrom = parseOptionalInt(getIndexerState(db, 'history_db_from'));
+  const historyStatus = getIndexerState(db, 'history_db_status');
   const backfillStatus = getIndexerState(db, 'backfill_status');
   const backfillFrom = parseOptionalInt(getIndexerState(db, 'backfill_from'));
+  const candidates: number[] = [];
+  if ((historyStatus === 'complete' || historyStatus === 'running') && historyFrom !== null) {
+    candidates.push(historyFrom);
+  }
   if (backfillStatus === 'complete' && backfillFrom !== null) {
-    return backfillFrom;
+    candidates.push(backfillFrom);
   }
   if (backfillStatus === 'running') {
     const applied = parseOptionalInt(getIndexerState(db, 'backfill_ledger'));
     if (applied !== null) {
-      return applied;
+      candidates.push(applied);
+    } else {
+      const through = parseOptionalInt(getIndexerState(db, 'backfill_through'));
+      if (through !== null) {
+        candidates.push(through);
+      }
     }
-    const through = parseOptionalInt(getIndexerState(db, 'backfill_through'));
-    if (through !== null) {
-      return through;
-    }
+  }
+  if (candidates.length > 0) {
+    return Math.min(...candidates);
   }
   if (backfillFrom !== null) {
     return backfillFrom;

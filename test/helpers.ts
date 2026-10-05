@@ -20,6 +20,11 @@ export function testConfig(overrides: Partial<Config> = {}): Config {
     apiTrustProxy: false,
     apiRateLimitAllow: [],
     apiWsMaxPerIp: null,
+    historyFromDb: false,
+    historyLedgerDb: null,
+    historyTxDb: null,
+    historyBatchSize: 500,
+    historyWorkers: 1,
     ...overrides,
   };
 }

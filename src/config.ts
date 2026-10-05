@@ -1,4 +1,5 @@
 import { existsSync, readFileSync } from 'node:fs';
+import { resolve as resolvePath } from 'node:path';
 
 import { config as loadDotenv, parse as parseDotenv } from 'dotenv';
 
@@ -49,6 +50,17 @@ export interface Config {
    * HTTP limiter is on, or no cap when it is off. `0` disables the cap.
    */
   apiWsMaxPerIp: number | null;
+  /**
+   * After snapshot + live gap fill, bulk-import DEX/URIToken history from
+   * xahaud `ledger.db` + `transaction.db` before the RPC walk.
+   */
+  historyFromDb: boolean;
+  historyLedgerDb: string | null;
+  historyTxDb: string | null;
+  /** Ledgers per read batch from the history files. */
+  historyBatchSize: number;
+  /** Decode stripes (yields to the event loop so live subscribe stays responsive). */
+  historyWorkers: number;
 }
 
 export class ConfigError extends Error {
@@ -176,6 +188,8 @@ export const SHARED_BACKFILL_INTERVAL_MS = 2_000;
 export const DEFAULT_API_RATE_LIMIT_WINDOW_MS = 60_000;
 export const DEFAULT_WS_MAX_PER_IP = 8;
 export const DEFAULT_API_BASE_URL = 'http://localhost:3000';
+export const DEFAULT_HISTORY_BATCH_SIZE = 500;
+export const DEFAULT_HISTORY_WORKERS = 4;
 
 function readOptionalPositiveInt(env: NodeJS.ProcessEnv, key: string): number | null {
   const raw = env[key];
@@ -299,6 +313,46 @@ export function rewriteDocsBaseUrl(text: string, baseUrl: string): string {
     .replaceAll(resolveWsBaseUrl(DEFAULT_API_BASE_URL), resolveWsBaseUrl(baseUrl));
 }
 
+function readExistingFilePath(env: NodeJS.ProcessEnv, key: string): string {
+  const raw = env[key];
+  if (raw === undefined || raw.trim() === '') {
+    throw new ConfigError(`${key} is required when BACKFILL_FROM_DB is set`);
+  }
+  const path = resolvePath(raw.trim());
+  if (!existsSync(path)) {
+    throw new ConfigError(`${key} file not found: ${path}`);
+  }
+  return path;
+}
+
+function readHistoryImport(env: NodeJS.ProcessEnv): {
+  historyFromDb: boolean;
+  historyLedgerDb: string | null;
+  historyTxDb: string | null;
+  historyBatchSize: number;
+  historyWorkers: number;
+} {
+  const historyFromDb = readBoolean(env, 'BACKFILL_FROM_DB', false);
+  const historyBatchSize = readOptionalPositiveInt(env, 'HISTORY_BATCH_SIZE') ?? DEFAULT_HISTORY_BATCH_SIZE;
+  const historyWorkers = readOptionalPositiveInt(env, 'HISTORY_WORKERS') ?? DEFAULT_HISTORY_WORKERS;
+  if (!historyFromDb) {
+    return {
+      historyFromDb,
+      historyLedgerDb: null,
+      historyTxDb: null,
+      historyBatchSize,
+      historyWorkers,
+    };
+  }
+  return {
+    historyFromDb,
+    historyLedgerDb: readExistingFilePath(env, 'HISTORY_LEDGER_DB'),
+    historyTxDb: readExistingFilePath(env, 'HISTORY_TX_DB'),
+    historyBatchSize,
+    historyWorkers,
+  };
+}
+
 function readApiBaseUrl(env: NodeJS.ProcessEnv): string {
   const raw = env.API_BASE_URL;
   if (raw === undefined || raw.trim() === '') {
@@ -328,6 +382,7 @@ function readApiBaseUrl(env: NodeJS.ProcessEnv): string {
 
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
   const backfillNode = readBackfillNode(env);
+  const history = readHistoryImport(env);
   return {
     xahaudUrl: readWebsocketUrl(env),
     dbPath: readString(env, 'DB_PATH', './data/xahauindex.db'),
@@ -345,6 +400,11 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     apiTrustProxy: readBoolean(env, 'API_TRUST_PROXY', false),
     apiRateLimitAllow: readRateLimitAllow(env),
     apiWsMaxPerIp: readOptionalNonNegativeInt(env, 'API_WS_MAX_PER_IP'),
+    historyFromDb: history.historyFromDb,
+    historyLedgerDb: history.historyLedgerDb,
+    historyTxDb: history.historyTxDb,
+    historyBatchSize: history.historyBatchSize,
+    historyWorkers: history.historyWorkers,
   };
 }
 

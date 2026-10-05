@@ -43,7 +43,7 @@ XahauIndex has three layers: an **ingester** (snapshot + live WebSocket), a **SQ
 4. Start the TOML worker and the URI metadata worker (icon URLs only).
 5. Subscribe to `ledger` on `XAHAUD_URL` at the current tip. Live catch-up starts at the live node's `complete_ledgers` floor (or the tip if that range is unknown), not last-indexed + 1. Ignore live apply at or before `snapshot_ledger`.
 6. If last-indexed is behind that floor, record a live gap and fill it forward on `BACKFILL_XAHAUD_URL` (or `XAHAUD_URL` if unset) with the same closed-ledger apply as live. Gap fill is paced (`BACKFILL_MIN_INTERVAL_MS`, default 2000ms) so a public history node is not exhausted.
-7. If `BACKFILL_FROM_LEDGER` or `BACKFILL_LOOKBACK` is set, then walk closed ledgers `L..FROM` downward in history mode (DEX trades + URIToken transfers only). History fetches use the same dedicated URL as the gap fill. Resume via `backfill_next` (next lower ledger). Missing historical ledgers are retried, then skipped.
+7. If `BACKFILL_FROM_DB` is set, bulk-import `ledger.db` + `transaction.db` (DEX trades + URIToken transfers) for the dump range up to `snapshot_ledger`. Resume via `history_db_next`. Then if `BACKFILL_FROM_LEDGER` or `BACKFILL_LOOKBACK` is set, walk closed ledgers `L..FROM` downward in history mode, jumping any range already imported from files. History fetches use the same dedicated URL as the gap fill. Missing historical ledgers are retried, then skipped.
 8. Listen on `API_HOST:API_PORT`. No auth. If `API_RATE_LIMIT_MAX` is set, apply an in-process per-IP HTTP limit and a `/v1/subscribe` connection cap. `/docs` cookbook curls, endpoint Open links, and `/v1/openapi.yaml` use `API_BASE_URL` (default `http://localhost:3000` when unset). Project site: `https://xahauindex.dev`.
 
 ### Snapshot
@@ -78,11 +78,15 @@ Objects consumed during snapshot:
 
 ### Historical backfill
 
-Optional backward walk. After snapshot and after the live-gap fill, if `BACKFILL_FROM_LEDGER` (alias `FULL_HISTORY_START`; `genesis`/`start` → `1`) or `BACKFILL_LOOKBACK` is set, walk `snapshot_ledger` down to `FROM` inclusive.
+Optional backward walk. After snapshot and after the live-gap fill:
+
+- If `BACKFILL_FROM_DB=true`, open `HISTORY_LEDGER_DB` + `HISTORY_TX_DB` read-only (`ledger.db` / `transaction.db` from a **copy** of a full-history xahaud node — not NuDB, not a live WAL). Filter `Status='V'` and Offer/Payment/URIToken types, decode `RawTxn` + `TxnMeta` with `@transia/xrpl`, and call `applyHistoricalLedger` walking **forward**. Cap at `snapshot_ledger`. Resume `history_db_next`. Do not skip snapshot.
+- Then if `BACKFILL_FROM_LEDGER` (alias `FULL_HISTORY_START`; `genesis`/`start` → `1`) or `BACKFILL_LOOKBACK` is set, walk `snapshot_ledger` down to `FROM` inclusive. Ledgers already imported from files are not refetched.
 
 - The live gap (last indexed → subscribe tip) is filled first, even when no backward bound is set.
-- Recent history is filled first. `genesis` keeps decrementing until ledger 1.
-- `FROM` wins when both are set. Neither set = no backward walk.
+- File import runs in the backfill worker after the live gap, in parallel with live follow.
+- Recent RPC history is filled first. `genesis` keeps decrementing until ledger 1, jumping the dump range.
+- `FROM` wins when both RPC bounds are set. Neither set = no RPC walk (file import can still run).
 - History mode writes DEX trades (idempotent) and URIToken transfers. If the URIToken already exists from the snapshot, owner/offer/burn are left alone.
 - Missing tokens get a full apply, then a burn when the node is a `DeletedNode`.
 - RippleState, AccountRoot, SetRemarks, and SetHook are not applied.
@@ -168,7 +172,7 @@ CREATE TABLE indexer_state (
 );
 ```
 
-Keys: `snapshot_status`, `snapshot_ledger`, `snapshot_marker`, `live_from_ledger`, `backfill_status`, `backfill_from`, `backfill_through`, `backfill_next`, `backfill_ledger`, `backfill_direction`, `network_id`.
+Keys: `snapshot_status`, `snapshot_ledger`, `snapshot_marker`, `live_from_ledger`, `backfill_status`, `backfill_from`, `backfill_through`, `backfill_next`, `backfill_ledger`, `backfill_direction`, `history_db_status`, `history_db_from`, `history_db_through`, `history_db_next`, `history_db_ledger`, `network_id`.
 
 ### `ledgers`
 

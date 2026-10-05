@@ -10,6 +10,7 @@ import {
 import type { SqliteDatabase } from '../db/client.js';
 import type { Runtime } from '../runtime.js';
 import { fillLiveGap, runBackfill, type BackfillResult } from './backfill.js';
+import { runHistoryDbImport } from './historyDb.js';
 import { snapshotLedgerBound } from './ledger.js';
 import {
   followLive,
@@ -182,6 +183,21 @@ export async function runDedicatedBackfill(options: {
       ...shared,
       minIntervalMs: gapIntervalMs,
     });
+    if (options.config.historyFromDb) {
+      try {
+        await runHistoryDbImport({
+          db: options.db,
+          config: options.config,
+          log: options.log,
+          ...(options.signal === undefined ? {} : { signal: options.signal }),
+        });
+      } catch (error) {
+        if (options.signal?.aborted) {
+          throw options.signal.reason ?? error;
+        }
+        options.log.error({ err: error }, 'history DB import failed; continuing with RPC backfill');
+      }
+    }
     return await runBackfill({
       ...shared,
       config: options.config,

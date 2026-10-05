@@ -4,6 +4,7 @@ import { getIndexerState, setIndexerState } from '../db/queries/indexer.js';
 import { withQuota } from '../util/quota.js';
 import { retry, sleep } from '../util/retry.js';
 import { applyClosedLedger, applyHistoricalLedger } from './ledger.js';
+import { historyImportedRange } from './historyDb.js';
 import {
   LIVE_GAP_NEXT,
   readLiveGap,
@@ -239,9 +240,14 @@ export async function runBackfill(options: {
   setIndexerState(db, 'backfill_direction', BACKFILL_DIRECTION);
   setIndexerState(db, 'backfill_next', String(index));
   setIndexerState(db, 'backfill_status', 'running');
+  const imported = historyImportedRange(db);
   const minIntervalMs = options.minIntervalMs ?? 0;
   log.info(
-    { ...backfillProgress(from, through, index), minIntervalMs },
+    {
+      ...backfillProgress(from, through, index),
+      minIntervalMs,
+      ...(imported === null ? {} : { historyDbFrom: imported.from, historyDbThrough: imported.through }),
+    },
     'historical backfill starting (snapshot → FROM)',
   );
 
@@ -257,6 +263,20 @@ export async function runBackfill(options: {
   while (index >= from) {
     if (options.signal?.aborted) {
       throw options.signal.reason ?? new Error('aborted');
+    }
+    if (imported !== null && index >= imported.from && index <= imported.through) {
+      const jumpedTo = imported.from - 1;
+      log.info(
+        {
+          skippedFrom: imported.from,
+          skippedThrough: imported.through,
+          next: jumpedTo,
+        },
+        'RPC backfill jumping history DB import range',
+      );
+      index = jumpedTo;
+      setIndexerState(db, 'backfill_next', String(index));
+      continue;
     }
     let ledger: ClosedLedger;
     try {
