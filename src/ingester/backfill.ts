@@ -121,7 +121,14 @@ function fetchClosedLedger(
       ...(options.signal === undefined ? {} : { signal: options.signal }),
       onRetry: ({ waitMs, rateLimited, error }) => {
         if (rateLimited) {
-          options.log.warn({ ledger: index, waitMs }, options.rateLimitMsg);
+          options.log.warn(
+            {
+              ledger: index,
+              waitMs,
+              ...(source.quota?.restricted ? { concurrentLimit: source.quota.concurrentLimit } : {}),
+            },
+            options.rateLimitMsg,
+          );
           return;
         }
         options.log.warn({ ledger: index, waitMs, err: error }, options.retryMsg);
@@ -157,6 +164,7 @@ export async function fillLiveGap(options: {
     start: gap.next,
     step: 1,
     concurrency,
+    launchDelayMs: minIntervalMs,
     inRange: (index) => {
       const current = readLiveGap(db);
       if (current === null) {
@@ -292,6 +300,7 @@ export async function runBackfill(options: {
     start: index,
     step: -1,
     concurrency,
+    launchDelayMs: minIntervalMs,
     inRange: (cursor) => cursor >= from,
     jump: (cursor) => {
       if (imported !== null && cursor >= imported.from && cursor <= imported.through) {

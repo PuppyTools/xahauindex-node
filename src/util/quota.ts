@@ -5,6 +5,8 @@ export type QuotaLane = 'live' | 'backfill';
 
 export const BACKFILL_QUOTA_PAUSE_MS = 15_000;
 export const BACKFILL_WAIT_LOG_MS = 30_000;
+/** Successful fetches after a 429 before overlapping RPCs are allowed again. */
+export const BACKFILL_RESTORE_SUCCESSES = 8;
 
 export type QuotaWaitInfo = {
   reason: 'cooldown' | 'live' | 'pause';
@@ -19,6 +21,7 @@ export class NodeQuota {
   private lastWaitNotify = 0;
   private readonly waiters: Array<() => void> = [];
   private readonly maxConcurrent: number;
+  private successesToRestore = 0;
 
   constructor(
     private readonly backfillPauseExtraMs = BACKFILL_QUOTA_PAUSE_MS,
@@ -29,6 +32,15 @@ export class NodeQuota {
 
   get liveBusy(): boolean {
     return this.liveDepth > 0;
+  }
+
+  /** True while a 429 has forced single in-flight RPC. */
+  get restricted(): boolean {
+    return this.successesToRestore > 0;
+  }
+
+  get concurrentLimit(): number {
+    return this.restricted ? 1 : this.maxConcurrent;
   }
 
   coolDown(waitMs: number, extras?: { pauseBackfillMs?: number }): void {
@@ -107,10 +119,15 @@ export class NodeQuota {
     const release = await this.lock(signal);
     try {
       await this.waitReady(lane, signal, onWait);
-      return await fn();
+      const result = await fn();
+      if (this.successesToRestore > 0) {
+        this.successesToRestore -= 1;
+      }
+      return result;
     } catch (error) {
       if (isRateLimited(error)) {
         const waitMs = rateLimitWaitMs(error);
+        this.successesToRestore = BACKFILL_RESTORE_SUCCESSES;
         this.coolDown(waitMs, { pauseBackfillMs: waitMs + this.backfillPauseExtraMs });
       }
       throw error;
@@ -124,7 +141,7 @@ export class NodeQuota {
       if (signal?.aborted) {
         throw signal.reason ?? new Error('aborted');
       }
-      if (this.inUse < this.maxConcurrent) {
+      if (this.inUse < this.concurrentLimit) {
         this.inUse += 1;
         return () => {
           this.inUse = Math.max(0, this.inUse - 1);

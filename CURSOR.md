@@ -149,7 +149,7 @@ Copy `.env.example` to `.env`. Never commit `.env`.
 - `BACKFILL_XAHAUD_URL` — optional dedicated history node (`ws`/`wss` or `http`/`https` JSON-RPC). Unset = reuse `XAHAUD_URL`. Live subscribe stays on `XAHAUD_URL` at the current tip; this node fills last-indexed → tip first, then walks backward.
 - `BACKFILL_ENV` — optional second env file for that node URL. Auto-loads `.env.backfill` when present.
 - `BACKFILL_MIN_INTERVAL_MS` — delay between historical fetches. Unset = `2000` when sharing the live node (public RPC quotas), `0` on a dedicated history URL. A shared node also gives live fetches priority and pauses backfill after `tooBusy`.
-- `BACKFILL_CONCURRENCY` — in-flight historical RPC fetches on a dedicated `BACKFILL_XAHAUD_URL`. Default `1`, cap `32`. Sharing `XAHAUD_URL` always uses `1`. Apply stays in ledger order. File import is unchanged (`HISTORY_WORKERS` is decode stripes only).
+- `BACKFILL_CONCURRENCY` — in-flight historical RPC fetches on a dedicated `BACKFILL_XAHAUD_URL`. Default `1`, cap `32`. Sharing `XAHAUD_URL` always uses `1`. Fetch starts are staggered by `BACKFILL_MIN_INTERVAL_MS`. A `tooBusy` / units-quota 429 drops in-flight to 1 until a few fetches succeed. Apply stays in ledger order. File import is unchanged (`HISTORY_WORKERS` is decode stripes only).
 - `BACKFILL_FROM_DB` — optional. After snapshot + live gap fill, import a copy of xahaud `ledger.db` + `transaction.db`. RPC then fills only the remainder.
 - `HISTORY_LEDGER_DB` / `HISTORY_TX_DB` — required when `BACKFILL_FROM_DB` is set. Read-only copy; never a live node's files.
 - `HISTORY_BATCH_SIZE` — default `500`.
