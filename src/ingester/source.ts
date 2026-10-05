@@ -1,6 +1,10 @@
 import { Client, rippleTimeToUnixTime, type LedgerStream } from '@transia/xrpl';
 
-import { NodeQuota } from '../util/quota.js';
+import { BACKFILL_QUOTA_PAUSE_MS, NodeQuota } from '../util/quota.js';
+
+export type XahauSourceOptions = {
+  maxConcurrent?: number;
+};
 
 export interface ValidatedLedger {
   index: number;
@@ -113,7 +117,11 @@ export function isLedgerNotFound(error: unknown): boolean {
   return texts.some((text) => /lgrNotFound|ledgerNotFound/i.test(text));
 }
 
-export function createJsonRpcSource(url: string): XahauSource {
+function createQuota(options: XahauSourceOptions = {}): NodeQuota {
+  return new NodeQuota(BACKFILL_QUOTA_PAUSE_MS, Math.max(1, options.maxConcurrent ?? 1));
+}
+
+export function createJsonRpcSource(url: string, options: XahauSourceOptions = {}): XahauSource {
   const requestLedger = async (ledgerIndex: number | 'validated'): Promise<ClosedLedger> => {
     const response = await fetch(url, {
       method: 'POST',
@@ -157,7 +165,7 @@ export function createJsonRpcSource(url: string): XahauSource {
   };
 
   return {
-    quota: new NodeQuota(),
+    quota: createQuota(options),
     connect: async () => undefined,
     disconnect: async () => undefined,
     reconnect: async () => undefined,
@@ -192,16 +200,16 @@ export function createJsonRpcSource(url: string): XahauSource {
   };
 }
 
-export function createBackfillSource(url: string): XahauSource {
+export function createBackfillSource(url: string, options: XahauSourceOptions = {}): XahauSource {
   if (isHttpUrl(url)) {
-    return createJsonRpcSource(url);
+    return createJsonRpcSource(url, options);
   }
-  return createXahauSource(url);
+  return createXahauSource(url, options);
 }
 
-export function createXahauSource(url: string): XahauSource {
+export function createXahauSource(url: string, options: XahauSourceOptions = {}): XahauSource {
   const client = new Client(url);
-  const quota = new NodeQuota();
+  const quota = createQuota(options);
   const listeners = new Set<(ledger: ValidatedLedger) => void>();
 
   const onClosed = (ledger: LedgerStream): void => {

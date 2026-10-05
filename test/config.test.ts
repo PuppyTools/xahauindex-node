@@ -9,7 +9,10 @@ import {
   DEFAULT_API_BASE_URL,
   DEFAULT_API_RATE_LIMIT_WINDOW_MS,
   DEFAULT_WS_MAX_PER_IP,
+  DEFAULT_BACKFILL_CONCURRENCY,
+  MAX_BACKFILL_CONCURRENCY,
   loadConfig,
+  resolveBackfillConcurrency,
   resolveBackfillFrom,
   resolveBackfillMinIntervalMs,
   resolveBackfillSourceUrl,
@@ -134,6 +137,9 @@ describe('loadConfig', () => {
     assert.equal(resolveBackfillMinIntervalMs(fallback, false), SHARED_BACKFILL_INTERVAL_MS);
     assert.equal(resolveBackfillMinIntervalMs(fallback, true), 0);
     assert.equal(resolveGapFillMinIntervalMs(fallback), SHARED_BACKFILL_INTERVAL_MS);
+    assert.equal(fallback.backfillConcurrency, DEFAULT_BACKFILL_CONCURRENCY);
+    assert.equal(resolveBackfillConcurrency(fallback, false), 1);
+    assert.equal(resolveBackfillConcurrency(fallback, true), 1);
   });
 
   it('reads BACKFILL_MIN_INTERVAL_MS including zero', () => {
@@ -144,6 +150,17 @@ describe('loadConfig', () => {
     const off = loadConfig({ BACKFILL_MIN_INTERVAL_MS: '0' });
     assert.equal(resolveBackfillMinIntervalMs(off, false), 0);
     assert.equal(resolveGapFillMinIntervalMs(off), 0);
+  });
+
+  it('reads BACKFILL_CONCURRENCY and forces 1 on a shared live node', () => {
+    const dedicated = loadConfig({ BACKFILL_CONCURRENCY: '8' });
+    assert.equal(dedicated.backfillConcurrency, 8);
+    assert.equal(resolveBackfillConcurrency(dedicated, true), 8);
+    assert.equal(resolveBackfillConcurrency(dedicated, false), 1);
+    const capped = loadConfig({ BACKFILL_CONCURRENCY: '64' });
+    assert.equal(capped.backfillConcurrency, 64);
+    assert.equal(resolveBackfillConcurrency(capped, true), MAX_BACKFILL_CONCURRENCY);
+    assert.throws(() => loadConfig({ BACKFILL_CONCURRENCY: '0' }), ConfigError);
   });
 
   it('reads the backfill node from a second env file', () => {

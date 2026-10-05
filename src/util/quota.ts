@@ -15,11 +15,17 @@ export class NodeQuota {
   private coolUntil = 0;
   private backfillPauseUntil = 0;
   private liveDepth = 0;
-  private locked = false;
+  private inUse = 0;
   private lastWaitNotify = 0;
   private readonly waiters: Array<() => void> = [];
+  private readonly maxConcurrent: number;
 
-  constructor(private readonly backfillPauseExtraMs = BACKFILL_QUOTA_PAUSE_MS) {}
+  constructor(
+    private readonly backfillPauseExtraMs = BACKFILL_QUOTA_PAUSE_MS,
+    maxConcurrent = 1,
+  ) {
+    this.maxConcurrent = Math.max(1, maxConcurrent);
+  }
 
   get liveBusy(): boolean {
     return this.liveDepth > 0;
@@ -114,7 +120,18 @@ export class NodeQuota {
   }
 
   private async lock(signal?: AbortSignal): Promise<() => void> {
-    if (this.locked) {
+    for (;;) {
+      if (signal?.aborted) {
+        throw signal.reason ?? new Error('aborted');
+      }
+      if (this.inUse < this.maxConcurrent) {
+        this.inUse += 1;
+        return () => {
+          this.inUse = Math.max(0, this.inUse - 1);
+          const next = this.waiters.shift();
+          next?.();
+        };
+      }
       await new Promise<void>((resolve, reject) => {
         const finish = (): void => {
           signal?.removeEventListener('abort', onAbort);
@@ -135,12 +152,6 @@ export class NodeQuota {
         signal?.addEventListener('abort', onAbort, { once: true });
       });
     }
-    this.locked = true;
-    return () => {
-      this.locked = false;
-      const next = this.waiters.shift();
-      next?.();
-    };
   }
 
   private notifyWait(onWait: ((info: QuotaWaitInfo) => void) | undefined, info: QuotaWaitInfo): void {

@@ -25,6 +25,7 @@ export function testConfig(overrides: Partial<Config> = {}): Config {
     historyTxDb: null,
     historyBatchSize: 500,
     historyWorkers: 1,
+    backfillConcurrency: 1,
     ...overrides,
   };
 }
