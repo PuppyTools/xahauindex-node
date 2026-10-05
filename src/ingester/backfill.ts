@@ -10,6 +10,7 @@ import {
   readLiveGap,
   type LiveLogger,
 } from './live.js';
+import { walkPrefetch } from './prefetch.js';
 import type { ClosedLedger, LiveLedgerSource } from './source.js';
 
 export type BackfillRunStatus = 'idle' | 'running' | 'complete';
@@ -88,6 +89,47 @@ export function resumeBackfillIndex(options: {
   return through;
 }
 
+function fetchClosedLedger(
+  source: Pick<LiveLedgerSource, 'getLedgerWithTransactions' | 'quota'>,
+  index: number,
+  options: {
+    log: LiveLogger;
+    signal?: AbortSignal;
+    fetchAttempts?: number;
+    retryMinMs?: number;
+    pauseMsg: string;
+    retryMsg: string;
+    rateLimitMsg: string;
+    progress?: Record<string, unknown>;
+  },
+): Promise<ClosedLedger> {
+  return retry(
+    () =>
+      withQuota(
+        source.quota,
+        'backfill',
+        () => source.getLedgerWithTransactions(index),
+        options.signal,
+        ({ reason, waitMs }) => {
+          options.log.info({ ledger: index, reason, waitMs, ...options.progress }, options.pauseMsg);
+        },
+      ),
+    {
+      minMs: options.retryMinMs ?? 1_000,
+      maxMs: 30_000,
+      attempts: options.fetchAttempts ?? 6,
+      ...(options.signal === undefined ? {} : { signal: options.signal }),
+      onRetry: ({ waitMs, rateLimited, error }) => {
+        if (rateLimited) {
+          options.log.warn({ ledger: index, waitMs }, options.rateLimitMsg);
+          return;
+        }
+        options.log.warn({ ledger: index, waitMs, err: error }, options.retryMsg);
+      },
+    },
+  );
+}
+
 export async function fillLiveGap(options: {
   db: SqliteDatabase;
   source: Pick<LiveLedgerSource, 'getLedgerWithTransactions' | 'quota'>;
@@ -96,90 +138,77 @@ export async function fillLiveGap(options: {
   fetchAttempts?: number;
   retryMinMs?: number;
   minIntervalMs?: number;
+  concurrency?: number;
 }): Promise<{ skipped: boolean; from: number | null; through: number | null; applied: number; skippedLedgers: number }> {
   const { db, source, log } = options;
   const gap = readLiveGap(db);
   if (gap === null) {
     return { skipped: true, from: null, through: null, applied: 0, skippedLedgers: 0 };
   }
-  let index = gap.next;
   const minIntervalMs = options.minIntervalMs ?? 0;
+  const concurrency = Math.max(1, options.concurrency ?? 1);
   log.info(
-    { from: gap.from, through: gap.through, next: index, minIntervalMs },
+    { from: gap.from, through: gap.through, next: gap.next, minIntervalMs, concurrency },
     'live gap fill starting (last indexed → subscribe tip)',
   );
   let applied = 0;
   let skippedLedgers = 0;
-  const pace = async (): Promise<void> => {
-    if (minIntervalMs > 0) {
-      await sleep(minIntervalMs, options.signal);
-    }
-  };
-  while (true) {
-    const current = readLiveGap(db);
-    if (current === null || index > current.through) {
-      break;
-    }
-    gap.through = current.through;
-    if (options.signal?.aborted) {
-      throw options.signal.reason ?? new Error('aborted');
-    }
-    let ledger: ClosedLedger;
-    try {
-      ledger = await retry(
-        () =>
-          withQuota(
-            source.quota,
-            'backfill',
-            () => source.getLedgerWithTransactions(index),
-            options.signal,
-            ({ reason, waitMs }) => {
-              log.info({ ledger: index, reason, waitMs }, 'live gap fill paused for quota');
-            },
-          ),
-        {
-          minMs: options.retryMinMs ?? 1_000,
-          maxMs: 30_000,
-          attempts: options.fetchAttempts ?? 6,
-          ...(options.signal === undefined ? {} : { signal: options.signal }),
-          onRetry: ({ waitMs, rateLimited, error }) => {
-            log.warn(
-              { ledger: index, waitMs, err: error },
-              rateLimited ? 'live gap fill rate-limited, waiting' : 'live gap fill retrying',
-            );
-          },
-        },
-      );
-    } catch (error) {
-      if (options.signal?.aborted) {
-        throw options.signal.reason ?? error;
+  await walkPrefetch({
+    start: gap.next,
+    step: 1,
+    concurrency,
+    inRange: (index) => {
+      const current = readLiveGap(db);
+      if (current === null) {
+        return false;
       }
-      log.warn({ err: error, ledger: index }, 'live gap ledger unavailable, skipping');
-      skippedLedgers += 1;
-      index += 1;
-      setIndexerState(db, LIVE_GAP_NEXT, String(index));
-      await pace();
-      continue;
-    }
-    const result = applyClosedLedger(db, ledger, log);
-    applied += result.applied ? 1 : 0;
-    index += 1;
-    setIndexerState(db, LIVE_GAP_NEXT, String(index));
-    if (result.applied || index % 100 === 0 || index > gap.through) {
-      log.info(
-        {
-          from: gap.from,
-          through: gap.through,
-          next: index,
-          ledger: result.index,
-          applied,
-          skippedLedgers,
-        },
-        'live gap fill progress',
-      );
-    }
-    await pace();
-  }
+      gap.through = current.through;
+      return index <= current.through;
+    },
+    fetch: (index) =>
+      fetchClosedLedger(source, index, {
+        log,
+        pauseMsg: 'live gap fill paused for quota',
+        retryMsg: 'live gap fill retrying',
+        rateLimitMsg: 'live gap fill rate-limited, waiting',
+        ...(options.signal === undefined ? {} : { signal: options.signal }),
+        ...(options.fetchAttempts === undefined ? {} : { fetchAttempts: options.fetchAttempts }),
+        ...(options.retryMinMs === undefined ? {} : { retryMinMs: options.retryMinMs }),
+      }),
+    visit: (index, outcome) => {
+      if (!outcome.ok) {
+        if (options.signal?.aborted) {
+          throw options.signal.reason ?? outcome.error;
+        }
+        log.warn({ err: outcome.error, ledger: index }, 'live gap ledger unavailable, skipping');
+        skippedLedgers += 1;
+        setIndexerState(db, LIVE_GAP_NEXT, String(index + 1));
+        return;
+      }
+      const result = applyClosedLedger(db, outcome.value, log);
+      applied += result.applied ? 1 : 0;
+      setIndexerState(db, LIVE_GAP_NEXT, String(index + 1));
+      if (result.applied || (index + 1) % 100 === 0 || index + 1 > gap.through) {
+        log.info(
+          {
+            from: gap.from,
+            through: gap.through,
+            next: index + 1,
+            ledger: result.index,
+            applied,
+            skippedLedgers,
+          },
+          'live gap fill progress',
+        );
+      }
+    },
+    afterVisit: async () => {
+      if (minIntervalMs > 0) {
+        await sleep(minIntervalMs, options.signal);
+      }
+    },
+    ...(options.signal === undefined ? {} : { signal: options.signal }),
+  });
   log.info(
     { from: gap.from, through: gap.through, applied, skippedLedgers },
     'live gap fill complete',
@@ -196,6 +225,7 @@ export async function runBackfill(options: {
   fetchAttempts?: number;
   retryMinMs?: number;
   minIntervalMs?: number;
+  concurrency?: number;
 }): Promise<BackfillResult> {
   const { db, source, config, log } = options;
   const empty: BackfillResult = {
@@ -227,7 +257,7 @@ export async function runBackfill(options: {
     return { skipped: true, from: storedFrom, through, applied: 0, skippedLedgers: 0 };
   }
 
-  let index = resumeBackfillIndex({
+  const index = resumeBackfillIndex({
     from,
     through,
     storedFrom,
@@ -242,10 +272,12 @@ export async function runBackfill(options: {
   setIndexerState(db, 'backfill_status', 'running');
   const imported = historyImportedRange(db);
   const minIntervalMs = options.minIntervalMs ?? 0;
+  const concurrency = Math.max(1, options.concurrency ?? 1);
   log.info(
     {
       ...backfillProgress(from, through, index),
       minIntervalMs,
+      concurrency,
       ...(imported === null ? {} : { historyDbFrom: imported.from, historyDbThrough: imported.through }),
     },
     'historical backfill starting (snapshot → FROM)',
@@ -255,94 +287,83 @@ export async function runBackfill(options: {
   let skippedLedgers = 0;
   const shouldLogProgress = (next: number, force: boolean): boolean =>
     force || next < from || next % 100 === 0;
-  const pace = async (): Promise<void> => {
-    if (minIntervalMs > 0) {
-      await sleep(minIntervalMs, options.signal);
-    }
-  };
-  while (index >= from) {
-    if (options.signal?.aborted) {
-      throw options.signal.reason ?? new Error('aborted');
-    }
-    if (imported !== null && index >= imported.from && index <= imported.through) {
-      const jumpedTo = imported.from - 1;
-      log.info(
-        {
-          skippedFrom: imported.from,
-          skippedThrough: imported.through,
-          next: jumpedTo,
-        },
-        'RPC backfill jumping history DB import range',
-      );
-      index = jumpedTo;
-      setIndexerState(db, 'backfill_next', String(index));
-      continue;
-    }
-    let ledger: ClosedLedger;
-    try {
-      ledger = await retry(
-        () =>
-          withQuota(
-            source.quota,
-            'backfill',
-            () => source.getLedgerWithTransactions(index),
-            options.signal,
-            ({ reason, waitMs }) => {
-              log.info(
-                { ...backfillProgress(from, through, index), reason, waitMs },
-                'historical backfill paused for live quota',
-              );
-            },
-          ),
-        {
-          minMs: options.retryMinMs ?? 1_000,
-          maxMs: 30_000,
-          attempts: options.fetchAttempts ?? 6,
-          ...(options.signal === undefined ? {} : { signal: options.signal }),
-          onRetry: ({ waitMs, rateLimited }) => {
-            if (rateLimited) {
-              log.warn({ ledger: index, waitMs }, 'historical backfill rate-limited, waiting');
-            }
-          },
-        },
-      );
-    } catch (error) {
-      if (options.signal?.aborted) {
-        throw options.signal.reason ?? error;
+  let loggedJump = false;
+  await walkPrefetch({
+    start: index,
+    step: -1,
+    concurrency,
+    inRange: (cursor) => cursor >= from,
+    jump: (cursor) => {
+      if (imported !== null && cursor >= imported.from && cursor <= imported.through) {
+        return imported.from - 1;
       }
-      log.warn({ err: error, ledger: index }, 'historical ledger unavailable, skipping');
-      skippedLedgers += 1;
-      index -= 1;
-      setIndexerState(db, 'backfill_next', String(index));
-      if (shouldLogProgress(index, false)) {
+      return null;
+    },
+    onJump: (_fromIndex, jumpedTo) => {
+      setIndexerState(db, 'backfill_next', String(jumpedTo));
+      if (!loggedJump && imported !== null) {
+        loggedJump = true;
         log.info(
-          { ...backfillProgress(from, through, index), skippedLedgers },
+          {
+            skippedFrom: imported.from,
+            skippedThrough: imported.through,
+            next: jumpedTo,
+          },
+          'RPC backfill jumping history DB import range',
+        );
+      }
+    },
+    fetch: (cursor) =>
+      fetchClosedLedger(source, cursor, {
+        log,
+        pauseMsg: 'historical backfill paused for live quota',
+        retryMsg: 'historical backfill retrying',
+        rateLimitMsg: 'historical backfill rate-limited, waiting',
+        progress: backfillProgress(from, through, cursor),
+        ...(options.signal === undefined ? {} : { signal: options.signal }),
+        ...(options.fetchAttempts === undefined ? {} : { fetchAttempts: options.fetchAttempts }),
+        ...(options.retryMinMs === undefined ? {} : { retryMinMs: options.retryMinMs }),
+      }),
+    visit: (cursor, outcome) => {
+      if (!outcome.ok) {
+        if (options.signal?.aborted) {
+          throw options.signal.reason ?? outcome.error;
+        }
+        log.warn({ err: outcome.error, ledger: cursor }, 'historical ledger unavailable, skipping');
+        skippedLedgers += 1;
+        setIndexerState(db, 'backfill_next', String(cursor - 1));
+        if (shouldLogProgress(cursor - 1, false)) {
+          log.info(
+            { ...backfillProgress(from, through, cursor - 1), skippedLedgers },
+            'historical backfill progress',
+          );
+        }
+        return;
+      }
+      const result = applyHistoricalLedger(db, outcome.value, log);
+      applied += result.applied ? 1 : 0;
+      setIndexerState(db, 'backfill_ledger', String(result.index));
+      setIndexerState(db, 'backfill_next', String(cursor - 1));
+      if (shouldLogProgress(cursor - 1, applied === 1)) {
+        log.info(
+          {
+            ...backfillProgress(from, through, cursor - 1),
+            ledger: result.index,
+            txApplied: result.txApplied,
+            trades: result.trades.length,
+            skippedLedgers,
+          },
           'historical backfill progress',
         );
       }
-      await pace();
-      continue;
-    }
-
-    const result = applyHistoricalLedger(db, ledger, log);
-    applied += result.applied ? 1 : 0;
-    setIndexerState(db, 'backfill_ledger', String(result.index));
-    index -= 1;
-    setIndexerState(db, 'backfill_next', String(index));
-    if (shouldLogProgress(index, applied === 1)) {
-      log.info(
-        {
-          ...backfillProgress(from, through, index),
-          ledger: result.index,
-          txApplied: result.txApplied,
-          trades: result.trades.length,
-          skippedLedgers,
-        },
-        'historical backfill progress',
-      );
-    }
-    await pace();
-  }
+    },
+    afterVisit: async () => {
+      if (minIntervalMs > 0) {
+        await sleep(minIntervalMs, options.signal);
+      }
+    },
+    ...(options.signal === undefined ? {} : { signal: options.signal }),
+  });
 
   setIndexerState(db, 'backfill_status', 'complete');
   log.info(

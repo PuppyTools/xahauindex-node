@@ -37,6 +37,11 @@ export interface Config {
    * the live node, 0 when using a dedicated backfill URL.
    */
   backfillMinIntervalMs: number | null;
+  /**
+   * In-flight historical RPC fetches. Only honored on a dedicated
+   * `BACKFILL_XAHAUD_URL`. Sharing `XAHAUD_URL` always uses 1.
+   */
+  backfillConcurrency: number;
   /** HTTP requests per IP per window. `null` / `0` leaves the API unlimited. */
   apiRateLimitMax: number | null;
   /** Rate-limit window in milliseconds. */
@@ -190,6 +195,8 @@ export const DEFAULT_WS_MAX_PER_IP = 8;
 export const DEFAULT_API_BASE_URL = 'http://localhost:3000';
 export const DEFAULT_HISTORY_BATCH_SIZE = 500;
 export const DEFAULT_HISTORY_WORKERS = 4;
+export const DEFAULT_BACKFILL_CONCURRENCY = 1;
+export const MAX_BACKFILL_CONCURRENCY = 32;
 
 function readOptionalPositiveInt(env: NodeJS.ProcessEnv, key: string): number | null {
   const raw = env[key];
@@ -280,6 +287,13 @@ export function resolveBackfillMinIntervalMs(config: Config, dedicatedNode: bool
     return config.backfillMinIntervalMs;
   }
   return dedicatedNode ? 0 : SHARED_BACKFILL_INTERVAL_MS;
+}
+
+export function resolveBackfillConcurrency(config: Config, dedicatedNode: boolean): number {
+  if (!dedicatedNode) {
+    return 1;
+  }
+  return Math.min(MAX_BACKFILL_CONCURRENCY, Math.max(1, config.backfillConcurrency));
 }
 
 export function resolveGapFillMinIntervalMs(config: Config): number {
@@ -395,6 +409,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     backfillXahaudUrl: backfillNode.backfillXahaudUrl,
     backfillEnvPath: backfillNode.backfillEnvPath,
     backfillMinIntervalMs: readOptionalNonNegativeInt(env, 'BACKFILL_MIN_INTERVAL_MS'),
+    backfillConcurrency: readOptionalPositiveInt(env, 'BACKFILL_CONCURRENCY') ?? DEFAULT_BACKFILL_CONCURRENCY,
     apiRateLimitMax: readRateLimitMax(env),
     apiRateLimitWindowMs: readRateLimitWindowMs(env),
     apiTrustProxy: readBoolean(env, 'API_TRUST_PROXY', false),

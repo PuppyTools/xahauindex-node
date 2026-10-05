@@ -1,6 +1,8 @@
 import { publishLedgerEvents } from '../api/publish.js';
 import type { EventHub } from '../api/hub.js';
 import {
+  MAX_BACKFILL_CONCURRENCY,
+  resolveBackfillConcurrency,
   resolveBackfillFrom,
   resolveBackfillMinIntervalMs,
   resolveBackfillSourceUrl,
@@ -148,14 +150,31 @@ export async function runDedicatedBackfill(options: {
   const from = snapshot >= 1 ? resolveBackfillFrom(options.config, snapshot) : null;
   const gap = readLiveGap(options.db);
   const dedicated = url !== options.config.xahaudUrl;
-  const history = dedicated && (from !== null || gap !== null) ? createBackfillSource(url) : null;
+  const requestedConcurrency = options.config.backfillConcurrency;
+  const concurrency = resolveBackfillConcurrency(options.config, dedicated);
+  const history =
+    dedicated && (from !== null || gap !== null)
+      ? createBackfillSource(url, { maxConcurrent: concurrency })
+      : null;
   const minIntervalMs = resolveBackfillMinIntervalMs(options.config, dedicated && from !== null);
   const gapIntervalMs = resolveGapFillMinIntervalMs(options.config);
+  if (!dedicated && requestedConcurrency > 1) {
+    options.log.info(
+      { requested: requestedConcurrency, using: 1, url },
+      'BACKFILL_CONCURRENCY requires a dedicated BACKFILL_XAHAUD_URL; sharing live node at 1',
+    );
+  } else if (dedicated && requestedConcurrency > MAX_BACKFILL_CONCURRENCY) {
+    options.log.info(
+      { requested: requestedConcurrency, using: concurrency },
+      'BACKFILL_CONCURRENCY capped',
+    );
+  }
   if (history) {
     await history.connect();
     options.log.info(
       {
         url,
+        concurrency,
         minIntervalMs: gap !== null ? gapIntervalMs : minIntervalMs,
         ...(options.config.backfillEnvPath === null ? {} : { env: options.config.backfillEnvPath }),
       },
@@ -174,6 +193,7 @@ export async function runDedicatedBackfill(options: {
     db: options.db,
     source,
     log: options.log,
+    concurrency,
     ...(options.signal === undefined ? {} : { signal: options.signal }),
     ...(options.fetchAttempts === undefined ? {} : { fetchAttempts: options.fetchAttempts }),
     ...(options.retryMinMs === undefined ? {} : { retryMinMs: options.retryMinMs }),

@@ -42,4 +42,21 @@ describe('NodeQuota', () => {
     await quota.run('live', async () => undefined);
     assert.ok(Date.now() - started >= 5);
   });
+
+  it('allows up to maxConcurrent overlapping runs', async () => {
+    const quota = new NodeQuota(1, 3);
+    let inflight = 0;
+    let max = 0;
+    await Promise.all(
+      [1, 2, 3, 4, 5].map(() =>
+        quota.run('backfill', async () => {
+          inflight += 1;
+          max = Math.max(max, inflight);
+          await sleep(40);
+          inflight -= 1;
+        }),
+      ),
+    );
+    assert.equal(max, 3);
+  });
 });

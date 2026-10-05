@@ -427,6 +427,38 @@ describe('runBackfill', () => {
     assert.equal(getIndexerState(db, 'backfill_next'), '8');
   });
 
+  it('prefetches historical ledgers on a dedicated concurrency cap', async () => {
+    const db = memoryDb();
+    seedSnapshot(db, 12);
+    const requested: number[] = [];
+    let inflight = 0;
+    let max = 0;
+    const result = await runBackfill({
+      db,
+      config: testConfig({ backfillFromLedger: 8 }),
+      concurrency: 4,
+      log: silentLog,
+      source: {
+        getLedgerWithTransactions: async (index) => {
+          requested.push(index);
+          inflight += 1;
+          max = Math.max(max, inflight);
+          await new Promise((resolve) => {
+            setTimeout(resolve, 20);
+          });
+          inflight -= 1;
+          return closedLedger(index, []);
+        },
+      },
+    });
+    assert.equal(result.skipped, false);
+    assert.deepEqual(requested.slice(0, 4), [12, 11, 10, 9]);
+    assert.equal(max, 4);
+    assert.equal(result.applied, 5);
+    assert.equal(getIndexerState(db, 'backfill_status'), 'complete');
+    assert.equal(getIndexerState(db, 'backfill_next'), '7');
+  });
+
   it('jumps the completed history DB import range instead of refetching it', async () => {
     const db = memoryDb();
     seedSnapshot(db, 12);
@@ -437,6 +469,7 @@ describe('runBackfill', () => {
     const result = await runBackfill({
       db,
       config: testConfig({ backfillFromLedger: 8 }),
+      concurrency: 4,
       log: silentLog,
       source: {
         getLedgerWithTransactions: async (index) => {
@@ -627,6 +660,49 @@ describe('fillLiveGap', () => {
     assert.equal(getLatestLedgerIndex(db), 13);
     assert.equal(readLiveGap(db), null);
   });
+
+  it('prefetches gap ledgers but applies them in ledger order', async () => {
+    const db = memoryDb();
+    seedSnapshot(db, 10);
+    setIndexerState(db, LIVE_GAP_FROM, '11');
+    setIndexerState(db, LIVE_GAP_THROUGH, '14');
+    setIndexerState(db, LIVE_GAP_NEXT, '11');
+    const requested: number[] = [];
+    const progress: number[] = [];
+    let inflight = 0;
+    let max = 0;
+    const result = await fillLiveGap({
+      db,
+      concurrency: 4,
+      source: {
+        getLedgerWithTransactions: async (index) => {
+          requested.push(index);
+          inflight += 1;
+          max = Math.max(max, inflight);
+          await new Promise((resolve) => {
+            setTimeout(resolve, index === 11 ? 30 : 5);
+          });
+          inflight -= 1;
+          return closedLedger(index, []);
+        },
+      },
+      log: {
+        ...silentLog,
+        info: (obj, msg) => {
+          if (msg === 'live gap fill progress' && typeof obj.ledger === 'number') {
+            progress.push(obj.ledger);
+          }
+        },
+      },
+    });
+    assert.equal(result.skipped, false);
+    assert.deepEqual(requested, [11, 12, 13, 14]);
+    assert.deepEqual(progress, [11, 12, 13, 14]);
+    assert.equal(max, 4);
+    assert.equal(result.applied, 4);
+    assert.equal(getLatestLedgerIndex(db), 14);
+    assert.equal(readLiveGap(db), null);
+  });
 });
 
 describe('runDedicatedBackfill', () => {
@@ -772,5 +848,35 @@ describe('runDedicatedBackfill', () => {
         });
       });
     }
+  });
+
+  it('keeps shared-node backfill serial even when BACKFILL_CONCURRENCY is set', async () => {
+    const db = memoryDb();
+    seedSnapshot(db, 12);
+    let inflight = 0;
+    let max = 0;
+    const result = await runDedicatedBackfill({
+      db,
+      liveSource: {
+        getLedgerWithTransactions: async (index) => {
+          inflight += 1;
+          max = Math.max(max, inflight);
+          await new Promise((resolve) => {
+            setTimeout(resolve, 15);
+          });
+          inflight -= 1;
+          return closedLedger(index, []);
+        },
+      },
+      config: testConfig({
+        xahaudUrl: 'wss://live.example',
+        backfillFromLedger: 10,
+        backfillConcurrency: 8,
+      }),
+      log: silentLog,
+    });
+    assert.equal(result.skipped, false);
+    assert.equal(result.applied, 3);
+    assert.equal(max, 1);
   });
 });
