@@ -7,6 +7,7 @@ import { applyClosedLedger, snapshotLedgerBound, type ApplyClosedLedgerResult } 
 import type { ApplyLogger } from './objects.js';
 import {
   completeRangeContaining,
+  isLedgerNotFound,
   parseCompleteLedgers,
   type ClosedLedger,
   type LiveLedgerSource,
@@ -61,24 +62,24 @@ export function readLiveGap(db: SqliteDatabase): LiveGap | null {
   return { from, through, next };
 }
 
+/** Live subscribe always starts at the node's current validated ledger. */
+export function subscribeLiveFrom(_sequential: number, tipIndex: number): number {
+  return tipIndex;
+}
+
 export function recordLiveSubscribeGap(
   db: SqliteDatabase,
   tipIndex: number,
-  liveCompleteFrom?: number | null,
+  _liveCompleteFrom?: number | null,
 ): LiveGap | null {
   const sequential = nextLedgerToApply(db);
-  const liveFrom =
-    liveCompleteFrom !== null &&
-    liveCompleteFrom !== undefined &&
-    liveCompleteFrom <= tipIndex &&
-    liveCompleteFrom > 0
-      ? liveCompleteFrom
-      : tipIndex;
+  const liveFrom = subscribeLiveFrom(sequential, tipIndex);
   const existing = readLiveGap(db);
   if (existing) {
-    if (sequential <= existing.through && liveFrom - 1 > existing.through) {
-      setIndexerState(db, LIVE_GAP_THROUGH, String(liveFrom - 1));
-      return { ...existing, through: liveFrom - 1 };
+    const through = liveFrom - 1;
+    if (through > existing.through) {
+      setIndexerState(db, LIVE_GAP_THROUGH, String(through));
+      return { ...existing, through };
     }
     return existing;
   }
@@ -96,16 +97,10 @@ export function recordLiveSubscribeGap(
 export function liveCatchUpFloor(
   db: SqliteDatabase,
   tipIndex: number,
-  liveCompleteFrom?: number | null,
+  _liveCompleteFrom?: number | null,
 ): number {
   const sequential = nextLedgerToApply(db);
-  const liveFrom =
-    liveCompleteFrom !== null &&
-    liveCompleteFrom !== undefined &&
-    liveCompleteFrom <= tipIndex &&
-    liveCompleteFrom > 0
-      ? liveCompleteFrom
-      : tipIndex;
+  const liveFrom = subscribeLiveFrom(sequential, tipIndex);
   const gap = readLiveGap(db);
   if (gap && sequential <= gap.through) {
     return liveFrom;
@@ -113,20 +108,28 @@ export function liveCatchUpFloor(
   return sequential;
 }
 
-async function readLiveCompleteFrom(
-  source: LiveLedgerSource,
-  tipIndex: number,
-): Promise<number | null> {
+export async function resolveLiveAvailable(
+  source: Pick<LiveLedgerSource, 'getValidatedLedger' | 'getCompleteLedgers'>,
+  fallbackThrough: number,
+): Promise<{ from: number; to: number }> {
+  let tip = fallbackThrough;
+  try {
+    tip = (await source.getValidatedLedger()).index;
+  } catch {
+    // use the stream / caller index
+  }
   if (source.getCompleteLedgers === undefined) {
-    return null;
+    return { from: tip, to: tip };
   }
   try {
-    const raw = await source.getCompleteLedgers();
-    const range = completeRangeContaining(parseCompleteLedgers(raw), tipIndex);
-    return range?.from ?? null;
+    const range = completeRangeContaining(parseCompleteLedgers(await source.getCompleteLedgers()), tip);
+    if (range !== null) {
+      return { from: range.from, to: Math.min(range.to, tip) };
+    }
   } catch {
-    return null;
+    // fall through
   }
+  return { from: tip, to: tip };
 }
 
 export async function catchUpLedgers(options: {
@@ -138,6 +141,8 @@ export async function catchUpLedgers(options: {
   signal?: AbortSignal;
   onApplied?: (result: ApplyClosedLedgerResult) => void;
   retryMinMs?: number;
+  fetchAttempts?: number;
+  giveUpIfMissing?: boolean;
 }): Promise<ApplyClosedLedgerResult[]> {
   const { db, source, log, through } = options;
   const applied: ApplyClosedLedgerResult[] = [];
@@ -148,26 +153,41 @@ export async function catchUpLedgers(options: {
       if (options.signal?.aborted) {
         throw options.signal.reason ?? new Error('aborted');
       }
-      const ledger: ClosedLedger = await retry(
-        () =>
-          withQuota(
-            source.quota,
-            'live',
-            () => source.getLedgerWithTransactions(index),
-            options.signal,
-          ),
-        {
-          minMs: options.retryMinMs ?? 1_000,
-          maxMs: 60_000,
-          ...(options.signal === undefined ? {} : { signal: options.signal }),
-          onRetry: ({ waitMs, rateLimited, error }) => {
-            log.warn(
-              { ledger: index, waitMs, err: error },
-              rateLimited ? 'live ledger fetch rate-limited, waiting' : 'live ledger fetch retrying',
-            );
+      let ledger: ClosedLedger;
+      try {
+        ledger = await retry(
+          () =>
+            withQuota(
+              source.quota,
+              'live',
+              () => source.getLedgerWithTransactions(index),
+              options.signal,
+            ),
+          {
+            minMs: options.retryMinMs ?? 1_000,
+            maxMs: 60_000,
+            ...(options.fetchAttempts === undefined ? {} : { attempts: options.fetchAttempts }),
+            ...(options.signal === undefined ? {} : { signal: options.signal }),
+            onRetry: ({ waitMs, rateLimited, error }) => {
+              if (rateLimited) {
+                log.warn({ ledger: index, waitMs, err: error }, 'live ledger fetch rate-limited, waiting');
+                return;
+              }
+              if (isLedgerNotFound(error)) {
+                log.info({ ledger: index, waitMs }, 'live ledger not on node yet, waiting');
+                return;
+              }
+              log.warn({ ledger: index, waitMs, err: error }, 'live ledger fetch retrying');
+            },
           },
-        },
-      );
+        );
+      } catch (error) {
+        if (options.giveUpIfMissing && isLedgerNotFound(error)) {
+          log.info({ ledger: index }, 'live ledger not on node yet, waiting for next close');
+          break;
+        }
+        throw error;
+      }
       const result = applyClosedLedger(db, ledger, log);
       applied.push(result);
       if (result.applied) {
@@ -231,20 +251,19 @@ export async function followLive(options: {
     },
   );
   runtime.networkLedgerIndex = tip.index;
-  const liveCompleteFrom = await readLiveCompleteFrom(source, tip.index);
-  const gap = recordLiveSubscribeGap(db, tip.index, liveCompleteFrom);
-  const minIndex = liveCatchUpFloor(db, tip.index, liveCompleteFrom);
+  const available = await resolveLiveAvailable(source, tip.index);
+  const liveFrom = available.to;
+  const gap = recordLiveSubscribeGap(db, liveFrom);
   if (gap) {
     log.info(
-      { from: gap.from, through: gap.through, tip: tip.index, liveFrom: minIndex },
-      'live subscribe at tip; backfill will fill the gap first',
+      { from: gap.from, through: gap.through, tip: liveFrom, completeFrom: available.from },
+      'live subscribe at current ledger; backfill will fill the gap first',
     );
   }
   const appliedOpts = {
     db,
     source,
     log,
-    minIndex,
     ...(options.signal === undefined ? {} : { signal: options.signal }),
     ...(options.onApplied === undefined ? {} : { onApplied: options.onApplied }),
     retryMinMs,
@@ -266,14 +285,33 @@ export async function followLive(options: {
   );
   const queue = new SerialQueue();
 
+  const applyAvailable = async (wantThrough: number): Promise<void> => {
+    const have = await resolveLiveAvailable(source, wantThrough);
+    runtime.networkLedgerIndex = Math.max(runtime.networkLedgerIndex ?? have.to, have.to);
+    const sequential = nextLedgerToApply(db);
+    let start = sequential;
+    if (start < have.from) {
+      recordLiveSubscribeGap(db, have.to);
+      start = have.to;
+    }
+    const through = Math.min(wantThrough, have.to);
+    if (start > through) {
+      return;
+    }
+    await catchUpLedgers({
+      ...appliedOpts,
+      through,
+      minIndex: start,
+      fetchAttempts: 2,
+      giveUpIfMissing: true,
+    });
+  };
+
   const handleClosed = (closed: ValidatedLedger): void => {
     runtime.networkLedgerIndex = Math.max(runtime.networkLedgerIndex ?? closed.index, closed.index);
     void queue.add(async () => {
       try {
-        await catchUpLedgers({
-          ...appliedOpts,
-          through: closed.index,
-        });
+        await applyAvailable(closed.index);
       } catch (error) {
         if (options.signal?.aborted) {
           return;
@@ -290,10 +328,7 @@ export async function followLive(options: {
   }
 
   try {
-    await catchUpLedgers({
-      ...appliedOpts,
-      through: tip.index,
-    });
+    await applyAvailable(liveFrom);
   } catch (error) {
     if (options.signal?.aborted) {
       unsubscribe();

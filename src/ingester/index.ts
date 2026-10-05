@@ -11,7 +11,14 @@ import type { SqliteDatabase } from '../db/client.js';
 import type { Runtime } from '../runtime.js';
 import { fillLiveGap, runBackfill, type BackfillResult } from './backfill.js';
 import { snapshotLedgerBound } from './ledger.js';
-import { followLive, readLiveGap, recordLiveSubscribeGap, type LiveLogger } from './live.js';
+import {
+  followLive,
+  liveCatchUpFloor,
+  nextLedgerToApply,
+  readLiveGap,
+  recordLiveSubscribeGap,
+  type LiveLogger,
+} from './live.js';
 import { completeRangeContaining, parseCompleteLedgers } from './source.js';
 import { runSnapshot } from './snapshot.js';
 import { createBackfillSource, createXahauSource, type XahauSource } from './source.js';
@@ -58,7 +65,20 @@ export async function startIngester(options: {
     } catch {
       completeFrom = null;
     }
-    recordLiveSubscribeGap(options.db, tip.index, completeFrom);
+    const gap = recordLiveSubscribeGap(options.db, tip.index, completeFrom);
+    const liveFrom = liveCatchUpFloor(options.db, tip.index, completeFrom);
+    options.log.info(
+      {
+        tip: tip.index,
+        lastNext: nextLedgerToApply(options.db),
+        completeFrom,
+        liveFrom,
+        ...(gap === null ? {} : { gapFrom: gap.from, gapThrough: gap.through }),
+      },
+      gap === null
+        ? 'live subscribe at tip'
+        : 'live subscribe at tip; backfill will fill the gap first',
+    );
     const live = followLive({
       db: options.db,
       source,
