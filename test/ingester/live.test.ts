@@ -113,6 +113,31 @@ describe('catchUpLedgers', () => {
     assert.equal(getLatestLedgerIndex(db), 12);
   });
 
+  it('retries ledgerNotFound on a just-closed live ledger', async () => {
+    const db = memoryDb();
+    seedLiveFrom(db, 10);
+    let hits = 0;
+    const results = await catchUpLedgers({
+      db,
+      source: {
+        getLedgerWithTransactions: async (index) => {
+          hits += 1;
+          if (hits === 1) {
+            throw new Error('ledgerNotFound');
+          }
+          return emptyLedger(index);
+        },
+      },
+      log: silentLog,
+      through: 11,
+      minIndex: 11,
+      retryMinMs: 1,
+    });
+    assert.equal(hits, 2);
+    assert.equal(results.length, 1);
+    assert.equal(getLatestLedgerIndex(db), 11);
+  });
+
   it('does not walk below minIndex so subscribe can start at the tip', async () => {
     const db = memoryDb();
     seedLiveFrom(db, 10);
@@ -151,6 +176,14 @@ describe('live subscribe gap', () => {
     const gap = recordLiveSubscribeGap(db, 20, 16);
     assert.deepEqual(gap, { from: 11, through: 15, next: 11 });
     assert.equal(liveCatchUpFloor(db, 20, 16), 16);
+  });
+
+  it('still records last-indexed → tip when complete_ledgers starts at genesis', () => {
+    const db = memoryDb();
+    seedLiveFrom(db, 10);
+    const gap = recordLiveSubscribeGap(db, 20, 1);
+    assert.deepEqual(gap, { from: 11, through: 19, next: 11 });
+    assert.equal(liveCatchUpFloor(db, 20, 1), 20);
   });
 
   it('parses xahaud complete_ledgers ranges', () => {

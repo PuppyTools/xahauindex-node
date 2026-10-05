@@ -7,6 +7,7 @@ import { applyClosedLedger, snapshotLedgerBound, type ApplyClosedLedgerResult } 
 import type { ApplyLogger } from './objects.js';
 import {
   completeRangeContaining,
+  isLedgerNotFound,
   parseCompleteLedgers,
   type ClosedLedger,
   type LiveLedgerSource,
@@ -61,19 +62,35 @@ export function readLiveGap(db: SqliteDatabase): LiveGap | null {
   return { from, through, next };
 }
 
+/**
+ * Ledgers the live node should fetch after subscribe.
+ * Use complete_ledgers only when that window starts *after* last-indexed + 1
+ * (short-history BARB). A full-history range starting at 1 must not clear the
+ * gap — that would make XAHAUD_URL walk last → tip and hit public RPC quotas.
+ */
+export function subscribeLiveFrom(
+  sequential: number,
+  tipIndex: number,
+  liveCompleteFrom?: number | null,
+): number {
+  if (
+    liveCompleteFrom !== null &&
+    liveCompleteFrom !== undefined &&
+    liveCompleteFrom > sequential &&
+    liveCompleteFrom <= tipIndex
+  ) {
+    return liveCompleteFrom;
+  }
+  return tipIndex;
+}
+
 export function recordLiveSubscribeGap(
   db: SqliteDatabase,
   tipIndex: number,
   liveCompleteFrom?: number | null,
 ): LiveGap | null {
   const sequential = nextLedgerToApply(db);
-  const liveFrom =
-    liveCompleteFrom !== null &&
-    liveCompleteFrom !== undefined &&
-    liveCompleteFrom <= tipIndex &&
-    liveCompleteFrom > 0
-      ? liveCompleteFrom
-      : tipIndex;
+  const liveFrom = subscribeLiveFrom(sequential, tipIndex, liveCompleteFrom);
   const existing = readLiveGap(db);
   if (existing) {
     if (sequential <= existing.through && liveFrom - 1 > existing.through) {
@@ -99,13 +116,7 @@ export function liveCatchUpFloor(
   liveCompleteFrom?: number | null,
 ): number {
   const sequential = nextLedgerToApply(db);
-  const liveFrom =
-    liveCompleteFrom !== null &&
-    liveCompleteFrom !== undefined &&
-    liveCompleteFrom <= tipIndex &&
-    liveCompleteFrom > 0
-      ? liveCompleteFrom
-      : tipIndex;
+  const liveFrom = subscribeLiveFrom(sequential, tipIndex, liveCompleteFrom);
   const gap = readLiveGap(db);
   if (gap && sequential <= gap.through) {
     return liveFrom;
@@ -161,10 +172,15 @@ export async function catchUpLedgers(options: {
           maxMs: 60_000,
           ...(options.signal === undefined ? {} : { signal: options.signal }),
           onRetry: ({ waitMs, rateLimited, error }) => {
-            log.warn(
-              { ledger: index, waitMs, err: error },
-              rateLimited ? 'live ledger fetch rate-limited, waiting' : 'live ledger fetch retrying',
-            );
+            if (rateLimited) {
+              log.warn({ ledger: index, waitMs, err: error }, 'live ledger fetch rate-limited, waiting');
+              return;
+            }
+            if (isLedgerNotFound(error)) {
+              log.info({ ledger: index, waitMs }, 'live ledger not on node yet, waiting');
+              return;
+            }
+            log.warn({ ledger: index, waitMs, err: error }, 'live ledger fetch retrying');
           },
         },
       );
