@@ -1,3 +1,5 @@
+import { sleep } from '../util/retry.js';
+
 export type PrefetchOutcome<T> =
   | { ok: true; value: T }
   | { ok: false; error: unknown };
@@ -14,6 +16,8 @@ export interface WalkPrefetchOptions<T> {
   fetch: (index: number) => Promise<T>;
   visit: (index: number, outcome: PrefetchOutcome<T>) => Promise<void> | void;
   afterVisit?: () => Promise<void>;
+  /** Delay between starting fetches so expanded ledgers do not burst the RPC quota. */
+  launchDelayMs?: number;
   signal?: AbortSignal;
 }
 
@@ -33,10 +37,12 @@ function throwIfAborted(signal?: AbortSignal): void {
  */
 export async function walkPrefetch<T>(options: WalkPrefetchOptions<T>): Promise<void> {
   const concurrency = Math.max(1, options.concurrency);
+  const launchDelayMs = Math.max(0, options.launchDelayMs ?? 0);
   const results = new Map<number, Promise<PrefetchOutcome<T>>>();
   let inFlight = 0;
   let nextFetch = options.start;
   let nextApply = options.start;
+  let lastLaunchAt = 0;
 
   const dropSkipped = (from: number, to: number): void => {
     for (const key of [...results.keys()]) {
@@ -77,6 +83,7 @@ export async function walkPrefetch<T>(options: WalkPrefetchOptions<T>): Promise<
       return;
     }
     inFlight += 1;
+    lastLaunchAt = Date.now();
     results.set(
       index,
       options
@@ -91,17 +98,38 @@ export async function walkPrefetch<T>(options: WalkPrefetchOptions<T>): Promise<
     );
   };
 
-  while (true) {
-    throwIfAborted(options.signal);
-    nextFetch = jumpCursor(nextFetch, 'fetch');
-    nextApply = jumpCursor(nextApply, 'apply');
-
+  const fillWindow = async (): Promise<void> => {
     while (inFlight < concurrency && options.inRange(nextFetch)) {
+      if (launchDelayMs > 0 && lastLaunchAt > 0) {
+        const wait = lastLaunchAt + launchDelayMs - Date.now();
+        if (wait > 0) {
+          const pendingApply = results.get(nextApply);
+          if (pendingApply === undefined) {
+            await sleep(wait, options.signal);
+          } else {
+            const raced = await Promise.race([
+              sleep(wait, options.signal).then(() => 'delay' as const),
+              pendingApply.then(() => 'ready' as const),
+            ]);
+            if (raced === 'ready') {
+              return;
+            }
+          }
+        }
+      }
       const index = nextFetch;
       nextFetch += options.step;
       launch(index);
       nextFetch = jumpCursor(nextFetch, 'fetch');
     }
+  };
+
+  while (true) {
+    throwIfAborted(options.signal);
+    nextFetch = jumpCursor(nextFetch, 'fetch');
+    nextApply = jumpCursor(nextApply, 'apply');
+
+    await fillWindow();
 
     if (!options.inRange(nextApply)) {
       return;

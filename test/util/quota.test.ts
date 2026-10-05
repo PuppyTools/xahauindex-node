@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
-import { NodeQuota } from '../../src/util/quota.js';
+import { BACKFILL_RESTORE_SUCCESSES, NodeQuota } from '../../src/util/quota.js';
 import { sleep } from '../../src/util/retry.js';
 
 describe('NodeQuota', () => {
@@ -53,6 +53,47 @@ describe('NodeQuota', () => {
           inflight += 1;
           max = Math.max(max, inflight);
           await sleep(40);
+          inflight -= 1;
+        }),
+      ),
+    );
+    assert.equal(max, 3);
+  });
+
+  it('drops overlapping fetches after a 429 until successes recover', async () => {
+    const quota = new NodeQuota(1, 3);
+    await assert.rejects(
+      () =>
+        quota.run('backfill', async () => {
+          throw new Error('rate limit: units quota (50000 per 10s) exhausted, retry in ~5ms');
+        }),
+      /rate limit/,
+    );
+    assert.equal(quota.restricted, true);
+    assert.equal(quota.concurrentLimit, 1);
+
+    let inflight = 0;
+    let max = 0;
+    for (let i = 0; i < BACKFILL_RESTORE_SUCCESSES; i += 1) {
+      await quota.run('backfill', async () => {
+        inflight += 1;
+        max = Math.max(max, inflight);
+        await sleep(5);
+        inflight -= 1;
+      });
+    }
+    assert.equal(max, 1);
+    assert.equal(quota.restricted, false);
+    assert.equal(quota.concurrentLimit, 3);
+
+    inflight = 0;
+    max = 0;
+    await Promise.all(
+      [1, 2, 3].map(() =>
+        quota.run('backfill', async () => {
+          inflight += 1;
+          max = Math.max(max, inflight);
+          await sleep(30);
           inflight -= 1;
         }),
       ),

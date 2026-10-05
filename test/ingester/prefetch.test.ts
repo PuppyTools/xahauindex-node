@@ -33,6 +33,27 @@ describe('walkPrefetch', () => {
     assert.equal(max, 4);
   });
 
+  it('staggers fetch starts by launchDelayMs', async () => {
+    const startedAt: number[] = [];
+    const origin = Date.now();
+    await walkPrefetch({
+      start: 3,
+      step: -1,
+      concurrency: 3,
+      launchDelayMs: 40,
+      inRange: (index) => index >= 1,
+      fetch: async (index) => {
+        startedAt.push(Date.now() - origin);
+        await sleep(80);
+        return index;
+      },
+      visit: () => undefined,
+    });
+    assert.equal(startedAt.length, 3);
+    assert.ok(startedAt[1]! - startedAt[0]! >= 25);
+    assert.ok(startedAt[2]! - startedAt[1]! >= 25);
+  });
+
   it('skips a jump range for both fetch and apply cursors', async () => {
     const fetched: number[] = [];
     const visited: number[] = [];
