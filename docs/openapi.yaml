@@ -9,6 +9,7 @@ info:
 
     Token URLs use two path segments: `/v1/tokens/{currency}/{issuer}`.
     Pair URLs use `/v1/prices/{base}/{counter}` with issuer query params.
+    `/v1/trades/{currency}` lists every pair that includes that asset.
     Native asset code is `XAH`.
     No API key. Operators may enable a per-IP HTTP limit (`API_RATE_LIMIT_MAX`);
     over the limit the API returns `429` with `error.code` `RATE_LIMITED`.
@@ -55,6 +56,8 @@ x-docs:
       body: >
         `/v1/prices/{base}/{counter}` with `base_issuer` / `counter_issuer` when that
         side is an IOU. Native `XAH` has a null issuer and needs no issuer query.
+        `/v1/trades/{currency}` (and `issuer` / `base_issuer` for an IOU) returns
+        every executed trade that includes that asset.
     - title: Amounts
       body: >
         IOU values stay decimal strings (including scientific notation from the ledger).
@@ -75,7 +78,8 @@ x-docs:
     - title: DEX UI
       body: >
         Candles: `GET /v1/prices/{base}/{counter}?period=1h&from=&to=`. Tape:
-        `/v1/trades/{base}/{counter}`. Native XAH has a null issuer — omit the issuer
+        `/v1/trades/{base}/{counter}` or `/v1/trades/{currency}` for every pair
+        that includes that asset. Native XAH has a null issuer — omit the issuer
         query. Live: subscribe to `prices`.
   schema_cards:
     - Token
@@ -116,6 +120,10 @@ x-cookbook:
   - title: DEX trade tape
     curl: |
       curl -s 'http://localhost:3000/v1/trades/USD/XAH?base_issuer=rHb9CJAWyB4rj91VRWn96DkukG4bwdtyTh&per_page=5'
+  - title: Trades for one currency
+    note: "Omit the counter to list every pair that includes that asset. IOUs need `issuer` (or `base_issuer`)."
+    curl: |
+      curl -s 'http://localhost:3000/v1/trades/XAH?per_page=5'
   - title: Account hook state
     curl: |
       curl -s http://localhost:3000/v1/hooks/rHktfGUbjqzU4GsYCMc1pDjdHXb5CJamto
@@ -220,6 +228,14 @@ components:
       name: counter_issuer
       in: query
       description: Required when `counter` is not `XAH`
+      schema:
+        type: string
+    query_issuer:
+      name: issuer
+      in: query
+      description: >
+        Required when `{currency}` is not `XAH`. `base_issuer` is accepted as an alias
+        on `/v1/trades/{currency}`.
       schema:
         type: string
     from:
@@ -1667,6 +1683,52 @@ paths:
           $ref: '#/components/responses/BadRequest'
         '404':
           $ref: '#/components/responses/NotFound'
+
+  /v1/trades/{currency}:
+    get:
+      operationId: getTradesByCurrency
+      tags: [prices]
+      summary: Executed DEX trades that include one asset
+      description: |
+        Every stored pair that has this currency on either side, newest first.
+        Native `XAH` needs no issuer. An IOU needs `issuer` (or `base_issuer`).
+        Pair candles stay on `/v1/prices/{base}/{counter}` — `period` does not
+        apply here.
+
+        Examples:
+        - `/v1/trades/XAH`
+        - `/v1/trades/EVR?issuer=rEvernodee8dJLaFsujS6q1EiXvZYmHXr8`
+      x-try: /v1/trades/XAH?per_page=5
+      parameters:
+        - $ref: '#/components/parameters/currency'
+        - $ref: '#/components/parameters/query_issuer'
+        - $ref: '#/components/parameters/base_issuer'
+        - $ref: '#/components/parameters/from'
+        - $ref: '#/components/parameters/to'
+        - $ref: '#/components/parameters/from_ledger'
+        - $ref: '#/components/parameters/to_ledger'
+        - $ref: '#/components/parameters/range_limit'
+        - $ref: '#/components/parameters/page'
+        - $ref: '#/components/parameters/per_page'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/DexTrade'
+                  meta:
+                    $ref: '#/components/schemas/Meta'
+              examples:
+                trades:
+                  $ref: '#/components/examples/Trades'
+        '400':
+          $ref: '#/components/responses/BadRequest'
 
   /v1/trades/{base}/{counter}:
     get:

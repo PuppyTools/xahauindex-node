@@ -57,6 +57,7 @@ describe('openDatabase', () => {
         '005_uri_metadata.sql',
         '006_toml_links.sql',
         '007_hook_definitions.sql',
+        '008_dex_trade_sides.sql',
       ],
     );
   });

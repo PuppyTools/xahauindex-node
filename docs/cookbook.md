@@ -66,6 +66,14 @@ curl -s 'http://localhost:3000/v1/prices/USD/XAH?base_issuer=rHb9CJAWyB4rj91VRWn
 curl -s 'http://localhost:3000/v1/trades/USD/XAH?base_issuer=rHb9CJAWyB4rj91VRWn96DkukG4bwdtyTh&per_page=5'
 ```
 
+## Trades for one currency
+
+Omit the counter to list every pair that includes that asset. IOUs need `issuer` (or `base_issuer`).
+
+```bash
+curl -s 'http://localhost:3000/v1/trades/XAH?per_page=5'
+```
+
 ## Account hook state
 
 ```bash

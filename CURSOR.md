@@ -118,6 +118,7 @@ Always base58 r-address. Validate with `@transia/xrpl` `isValidAddress()`.
 - DB token id: `currency:issuer`
 - URL token: `/v1/tokens/{currency}/{issuer}` — never `:` or `+` in one segment
 - URL pair: `/v1/prices/{base}/{counter}` with `base_issuer` / `counter_issuer` query params
+- URL trades for one asset: `/v1/trades/{currency}` with `issuer` (or `base_issuer`) when that side is an IOU
 - Native asset code: `XAH`, issuer `NULL`
 
 ## Coding style

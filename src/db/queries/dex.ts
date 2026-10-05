@@ -34,6 +34,36 @@ export function insertDexTrade(db: SqliteDatabase, row: Omit<DexTradeRow, 'id'>)
   return result.changes > 0;
 }
 
+export interface DexRangeOpts {
+  from?: number;
+  to?: number;
+  fromLedger?: number;
+  toLedger?: number;
+}
+
+function applyRange(
+  where: string[],
+  params: Record<string, string | number | null>,
+  opts: DexRangeOpts,
+): void {
+  if (opts.from !== undefined) {
+    where.push('close_time >= @from');
+    params.from = opts.from;
+  }
+  if (opts.to !== undefined) {
+    where.push('close_time < @to');
+    params.to = opts.to;
+  }
+  if (opts.fromLedger !== undefined) {
+    where.push('ledger_index >= @from_ledger');
+    params.from_ledger = opts.fromLedger;
+  }
+  if (opts.toLedger !== undefined) {
+    where.push('ledger_index <= @to_ledger');
+    params.to_ledger = opts.toLedger;
+  }
+}
+
 export function listDexTrades(
   db: SqliteDatabase,
   pair: PairKey,
@@ -54,22 +84,7 @@ export function listDexTrades(
   };
   where.push('ifnull(base_issuer, \'\') = ifnull(@base_issuer, \'\')');
   where.push('ifnull(counter_issuer, \'\') = ifnull(@counter_issuer, \'\')');
-  if (opts.from !== undefined) {
-    where.push('close_time >= @from');
-    params.from = opts.from;
-  }
-  if (opts.to !== undefined) {
-    where.push('close_time < @to');
-    params.to = opts.to;
-  }
-  if (opts.fromLedger !== undefined) {
-    where.push('ledger_index >= @from_ledger');
-    params.from_ledger = opts.fromLedger;
-  }
-  if (opts.toLedger !== undefined) {
-    where.push('ledger_index <= @to_ledger');
-    params.to_ledger = opts.toLedger;
-  }
+  applyRange(where, params, opts);
   return db
     .prepare(
       `
@@ -80,6 +95,60 @@ export function listDexTrades(
       `,
     )
     .all(params) as DexTradeRow[];
+}
+
+export function listDexTradesForCurrency(
+  db: SqliteDatabase,
+  side: { currency: string; issuer: string | null },
+  opts: DexRangeOpts & { limit: number; offset?: number },
+): DexTradeRow[] {
+  const where = [
+    `(
+      (base_currency = @currency AND ifnull(base_issuer, '') = ifnull(@issuer, ''))
+      OR
+      (counter_currency = @currency AND ifnull(counter_issuer, '') = ifnull(@issuer, ''))
+    )`,
+  ];
+  const params: Record<string, string | number | null> = {
+    currency: side.currency,
+    issuer: side.issuer,
+    limit: opts.limit,
+    offset: opts.offset ?? 0,
+  };
+  applyRange(where, params, opts);
+  return db
+    .prepare(
+      `
+      SELECT * FROM dex_trades
+      WHERE ${where.join(' AND ')}
+      ORDER BY close_time DESC, id DESC
+      LIMIT @limit OFFSET @offset
+      `,
+    )
+    .all(params) as DexTradeRow[];
+}
+
+export function countDexTradesForCurrency(
+  db: SqliteDatabase,
+  side: { currency: string; issuer: string | null },
+  opts: DexRangeOpts,
+): number {
+  const where = [
+    `(
+      (base_currency = @currency AND ifnull(base_issuer, '') = ifnull(@issuer, ''))
+      OR
+      (counter_currency = @currency AND ifnull(counter_issuer, '') = ifnull(@issuer, ''))
+    )`,
+  ];
+  const params: Record<string, string | number | null> = {
+    currency: side.currency,
+    issuer: side.issuer,
+  };
+  applyRange(where, params, opts);
+  const row = db
+    .prepare(`SELECT COUNT(*) AS n FROM dex_trades WHERE ${where.join(' AND ')}`)
+    .get(params) as { n: number };
+  return row.n;
 }
 
 export function countDexTrades(
