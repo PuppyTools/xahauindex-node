@@ -73,17 +73,21 @@ LOG_LEVEL=info
 
 Default network is **Xahau mainnet**. A public WebSocket is fine for development; a local xahaud is better for snapshot speed.
 
-Historical backfill is **off** unless you set one of:
+Historical backfill is **off** unless you set a stop bound, file import, or both:
 
 | Variable | Meaning |
 |----------|---------|
 | `BACKFILL_FROM_LEDGER` | Earliest ledger to walk down to. `genesis` / `start` = `1`. Alias: `FULL_HISTORY_START`. |
 | `BACKFILL_LOOKBACK` | Walk `LOOKBACK` ledgers back from the snapshot when `FROM` is unset. |
-| `BACKFILL_XAHAUD_URL` | Dedicated full-history node (`ws`/`wss` or `http`/`https` JSON-RPC). Live subscribe stays on `XAHAUD_URL`. On start, this node fills the gap from last indexed → the subscribe tip first, then walks history backward. |
+| `BACKFILL_FROM_DB` | `true` to bulk-import a copy of xahaud `ledger.db` + `transaction.db` after snapshot + live gap fill. |
+| `HISTORY_LEDGER_DB` / `HISTORY_TX_DB` | Paths to those files (required when `BACKFILL_FROM_DB` is on). Read-only. Use a copy, not a live node's WAL. |
+| `HISTORY_BATCH_SIZE` | Ledgers per read batch. Default `500`. |
+| `HISTORY_WORKERS` | Decode stripes / event-loop yield. Default `4`. |
+| `BACKFILL_XAHAUD_URL` | Dedicated full-history node (`ws`/`wss` or `http`/`https` JSON-RPC). Live subscribe stays on `XAHAUD_URL`. On start, this node fills the gap from last indexed → the subscribe tip first, then walks history backward (skipping ledgers already imported from files). |
 | `BACKFILL_ENV` | Optional second env file. `XAHAUD_URL` or `BACKFILL_XAHAUD_URL` in that file is the history node. Defaults to `.env.backfill` when that file exists. |
 | `BACKFILL_MIN_INTERVAL_MS` | Delay between historical fetches. Unset = `2000` when sharing `XAHAUD_URL`, `0` on a dedicated history node. |
 
-If both stop bounds are set, `BACKFILL_FROM_LEDGER` wins. Live subscribe attaches at the current tip on `XAHAUD_URL` and does not walk the missing ledgers first. Those are a forward gap fill on `BACKFILL_XAHAUD_URL` (or `XAHAUD_URL` if unset), then the walk starts at the snapshot ledger and decrements until the bound — `genesis` means keep going backward until ledger 1. Resume is the next lower ledger (`backfill_next`). Use a full-history node for the gap and backward walk when the subscription node only keeps recent ledgers. Sharing the public RPC with live subscribe is paced (2s) so a genesis walk cannot exhaust the 10s quota and drop the live stream. Live fetches win the shared socket; `tooBusy` sets one cooldown and pauses backfill so both sides do not retry together. Rate-limit responses do not skip a ledger or stop the process. Public nodes that still cannot serve an index are retried, then skipped. The snapshot remains the source of current balances, owners, issuers, and Hooks. Backfill records DEX trades and URIToken transfers only. Gap fill applies the same closed-ledger path as live.
+If both stop bounds are set, `BACKFILL_FROM_LEDGER` wins. Live subscribe attaches at the current tip on `XAHAUD_URL` and does not walk the missing ledgers first. Those are a forward gap fill on `BACKFILL_XAHAUD_URL` (or `XAHAUD_URL` if unset). When `BACKFILL_FROM_DB` is set, the backfill worker then reads the dump forward (validated Offer/Payment/URIToken txs only) and applies the same historical path as RPC. The RPC walk starts at the snapshot ledger and decrements until the bound, jumping any range already imported from files — `genesis` means keep going backward until ledger 1. Resume is `history_db_next` for the dump and `backfill_next` for RPC. Use a full-history node's **copied** SQLite files for the dump; NuDB is not used. Sharing the public RPC with live subscribe is paced (2s) so a genesis walk cannot exhaust the 10s quota and drop the live stream. Live fetches win the shared socket; `tooBusy` sets one cooldown and pauses backfill so both sides do not retry together. Rate-limit responses do not skip a ledger or stop the process. Public nodes that still cannot serve an index are retried, then skipped. The snapshot remains the source of current balances, owners, issuers, and Hooks. Backfill records DEX trades and URIToken transfers only. Gap fill applies the same closed-ledger path as live.
 
 `API_BASE_URL` is the origin written into `/docs` cookbook curls, endpoint Open links, and `/v1/openapi.yaml`. Default `http://localhost:3000` when unset. It does not change `API_HOST` / `API_PORT`. The hosted project site is [https://xahauindex.dev](https://xahauindex.dev).
 

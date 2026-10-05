@@ -53,6 +53,8 @@ src/
     index.ts        — WebSocket lifecycle manager
     snapshot.ts     — ledger_data walk + resume; retarget if L is gone
     backfill.ts     — optional historical tx walk, snapshot → FROM (trades + URIToken transfers)
+    historyDb.ts    — bulk import from xahaud ledger.db + transaction.db
+    historyDecode.ts — RawTxn / TxnMeta binary → ClosedLedger txs
     ledger.ts       — ledger_closed handler, orchestrates batch processing
     tokens.ts       — IOU trust-line ingestion
     uritokens.ts    — URIToken lifecycle
@@ -147,6 +149,10 @@ Copy `.env.example` to `.env`. Never commit `.env`.
 - `BACKFILL_XAHAUD_URL` — optional dedicated history node (`ws`/`wss` or `http`/`https` JSON-RPC). Unset = reuse `XAHAUD_URL`. Live subscribe stays on `XAHAUD_URL` at the current tip; this node fills last-indexed → tip first, then walks backward.
 - `BACKFILL_ENV` — optional second env file for that node URL. Auto-loads `.env.backfill` when present.
 - `BACKFILL_MIN_INTERVAL_MS` — delay between historical fetches. Unset = `2000` when sharing the live node (public RPC quotas), `0` on a dedicated history URL. A shared node also gives live fetches priority and pauses backfill after `tooBusy`.
+- `BACKFILL_FROM_DB` — optional. After snapshot + live gap fill, import a copy of xahaud `ledger.db` + `transaction.db`. RPC then fills only the remainder.
+- `HISTORY_LEDGER_DB` / `HISTORY_TX_DB` — required when `BACKFILL_FROM_DB` is set. Read-only copy; never a live node's files.
+- `HISTORY_BATCH_SIZE` — default `500`.
+- `HISTORY_WORKERS` — decode stripes / event-loop yield. Default `4`. Concurrent RPC workers are a separate follow-up.
 - `API_RATE_LIMIT_MAX` — optional HTTP requests per IP per window. Unset / `0` = off. No API keys.
 - `API_RATE_LIMIT_WINDOW_MS` — default `60000`.
 - `API_TRUST_PROXY` — default `false`. Set `true` only behind a reverse proxy that sets `X-Forwarded-For`.

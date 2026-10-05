@@ -4,6 +4,7 @@ import { afterEach, describe, it } from 'node:test';
 import { closeDatabase, openDatabase, type SqliteDatabase } from '../../src/db/client.js';
 import { listDexTrades, listOhlcvCandles } from '../../src/db/queries/dex.js';
 import { getIndexerState, getLatestLedgerIndex, setIndexerState, upsertLedger } from '../../src/db/queries/indexer.js';
+import { HISTORY_DB_FROM, HISTORY_DB_STATUS, HISTORY_DB_THROUGH } from '../../src/ingester/historyDb.js';
 import { getToken, getTrustLine, upsertTrustLine } from '../../src/db/queries/tokens.js';
 import { getUriToken, listUriTokenTransfers, upsertUriToken } from '../../src/db/queries/uritokens.js';
 import { createServer } from 'node:http';
@@ -424,6 +425,30 @@ describe('runBackfill', () => {
     assert.equal(getIndexerState(db, 'backfill_status'), 'complete');
     assert.equal(getIndexerState(db, 'backfill_from'), '9');
     assert.equal(getIndexerState(db, 'backfill_next'), '8');
+  });
+
+  it('jumps the completed history DB import range instead of refetching it', async () => {
+    const db = memoryDb();
+    seedSnapshot(db, 12);
+    setIndexerState(db, HISTORY_DB_STATUS, 'complete');
+    setIndexerState(db, HISTORY_DB_FROM, '9');
+    setIndexerState(db, HISTORY_DB_THROUGH, '11');
+    const requested: number[] = [];
+    const result = await runBackfill({
+      db,
+      config: testConfig({ backfillFromLedger: 8 }),
+      log: silentLog,
+      source: {
+        getLedgerWithTransactions: async (index) => {
+          requested.push(index);
+          return closedLedger(index, []);
+        },
+      },
+    });
+    assert.equal(result.skipped, false);
+    assert.deepEqual(requested, [12, 8]);
+    assert.equal(getIndexerState(db, 'backfill_status'), 'complete');
+    assert.equal(getIndexerState(db, 'backfill_next'), '7');
   });
 
   it('retries a rate-limited ledger instead of skipping it', async () => {
