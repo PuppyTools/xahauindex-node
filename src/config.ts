@@ -25,8 +25,8 @@ export interface Config {
   /** If `backfillFromLedger` is unset, stop at `snapshot - lookback + 1`. */
   backfillLookback: number | null;
   /**
-   * Dedicated history node for backfill (`ws`/`wss` or `http`/`https` JSON-RPC).
-   * Null means reuse `xahaudUrl`.
+   * Dedicated history node for the live gap fill and backward backfill
+   * (`ws`/`wss` or `http`/`https` JSON-RPC). Null means reuse `xahaudUrl`.
    */
   backfillXahaudUrl: string | null;
   /** Second env file that supplied the backfill node URL, if any. */
@@ -266,6 +266,13 @@ export function resolveBackfillMinIntervalMs(config: Config, dedicatedNode: bool
     return config.backfillMinIntervalMs;
   }
   return dedicatedNode ? 0 : SHARED_BACKFILL_INTERVAL_MS;
+}
+
+export function resolveGapFillMinIntervalMs(config: Config): number {
+  if (config.backfillMinIntervalMs !== null) {
+    return config.backfillMinIntervalMs;
+  }
+  return SHARED_BACKFILL_INTERVAL_MS;
 }
 
 export function resolveWsMaxPerIp(config: Config): number | null {

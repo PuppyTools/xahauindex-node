@@ -4,13 +4,15 @@ import {
   resolveBackfillFrom,
   resolveBackfillMinIntervalMs,
   resolveBackfillSourceUrl,
+  resolveGapFillMinIntervalMs,
   type Config,
 } from '../config.js';
 import type { SqliteDatabase } from '../db/client.js';
 import type { Runtime } from '../runtime.js';
-import { runBackfill, type BackfillResult } from './backfill.js';
+import { fillLiveGap, runBackfill, type BackfillResult } from './backfill.js';
 import { snapshotLedgerBound } from './ledger.js';
-import { followLive, type LiveLogger } from './live.js';
+import { followLive, readLiveGap, recordLiveSubscribeGap, type LiveLogger } from './live.js';
+import { completeRangeContaining, parseCompleteLedgers } from './source.js';
 import { runSnapshot } from './snapshot.js';
 import { createBackfillSource, createXahauSource, type XahauSource } from './source.js';
 import { runUriMetaWorker } from './metadata.js';
@@ -44,6 +46,19 @@ export async function startIngester(options: {
     if (options.signal?.aborted) {
       return;
     }
+    let completeFrom: number | null = null;
+    try {
+      if (source.getCompleteLedgers !== undefined) {
+        completeFrom =
+          completeRangeContaining(
+            parseCompleteLedgers(await source.getCompleteLedgers()),
+            tip.index,
+          )?.from ?? null;
+      }
+    } catch {
+      completeFrom = null;
+    }
+    recordLiveSubscribeGap(options.db, tip.index, completeFrom);
     const live = followLive({
       db: options.db,
       source,
@@ -110,35 +125,47 @@ export async function runDedicatedBackfill(options: {
   const url = resolveBackfillSourceUrl(options.config);
   const snapshot = snapshotLedgerBound(options.db);
   const from = snapshot >= 1 ? resolveBackfillFrom(options.config, snapshot) : null;
-  const dedicated = from !== null && url !== options.config.xahaudUrl;
-  const history = dedicated ? createBackfillSource(url) : null;
-  const minIntervalMs = resolveBackfillMinIntervalMs(options.config, dedicated);
+  const gap = readLiveGap(options.db);
+  const dedicated = url !== options.config.xahaudUrl;
+  const history = dedicated && (from !== null || gap !== null) ? createBackfillSource(url) : null;
+  const minIntervalMs = resolveBackfillMinIntervalMs(options.config, dedicated && from !== null);
+  const gapIntervalMs = resolveGapFillMinIntervalMs(options.config);
   if (history) {
     await history.connect();
     options.log.info(
       {
         url,
-        minIntervalMs,
+        minIntervalMs: gap !== null ? gapIntervalMs : minIntervalMs,
         ...(options.config.backfillEnvPath === null ? {} : { env: options.config.backfillEnvPath }),
       },
-      'historical backfill using dedicated node',
+      gap !== null
+        ? 'dedicated history node for live gap fill and backfill'
+        : 'historical backfill using dedicated node',
     );
-  } else if (from !== null && minIntervalMs > 0) {
+  } else if ((from !== null || gap !== null) && minIntervalMs > 0) {
     options.log.info(
       { minIntervalMs, url },
       'historical backfill pacing shared live node to stay under public RPC quotas',
     );
   }
+  const source = history ?? options.liveSource;
+  const shared = {
+    db: options.db,
+    source,
+    log: options.log,
+    ...(options.signal === undefined ? {} : { signal: options.signal }),
+    ...(options.fetchAttempts === undefined ? {} : { fetchAttempts: options.fetchAttempts }),
+    ...(options.retryMinMs === undefined ? {} : { retryMinMs: options.retryMinMs }),
+  };
   try {
+    await fillLiveGap({
+      ...shared,
+      minIntervalMs: gapIntervalMs,
+    });
     return await runBackfill({
-      db: options.db,
-      source: history ?? options.liveSource,
+      ...shared,
       config: options.config,
-      log: options.log,
       minIntervalMs,
-      ...(options.signal === undefined ? {} : { signal: options.signal }),
-      ...(options.fetchAttempts === undefined ? {} : { fetchAttempts: options.fetchAttempts }),
-      ...(options.retryMinMs === undefined ? {} : { retryMinMs: options.retryMinMs }),
     });
   } finally {
     if (history) {

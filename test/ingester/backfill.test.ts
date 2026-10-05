@@ -12,10 +12,12 @@ import type { AddressInfo } from 'node:net';
 import {
   BACKFILL_DIRECTION,
   backfillProgress,
+  fillLiveGap,
   resumeBackfillIndex,
   runBackfill,
 } from '../../src/ingester/backfill.js';
 import { runDedicatedBackfill } from '../../src/ingester/index.js';
+import { LIVE_GAP_FROM, LIVE_GAP_NEXT, LIVE_GAP_THROUGH, readLiveGap } from '../../src/ingester/live.js';
 import { applyClosedLedger, applyHistoricalLedger } from '../../src/ingester/ledger.js';
 import type { ClosedLedger } from '../../src/ingester/source.js';
 import { silentLog, testConfig } from '../helpers.js';
@@ -576,6 +578,32 @@ describe('resumeBackfillIndex', () => {
   });
 });
 
+describe('fillLiveGap', () => {
+  it('walks last indexed + 1 up to the subscribe tip', async () => {
+    const db = memoryDb();
+    seedSnapshot(db, 10);
+    setIndexerState(db, LIVE_GAP_FROM, '11');
+    setIndexerState(db, LIVE_GAP_THROUGH, '13');
+    setIndexerState(db, LIVE_GAP_NEXT, '11');
+    const requested: number[] = [];
+    const result = await fillLiveGap({
+      db,
+      source: {
+        getLedgerWithTransactions: async (index) => {
+          requested.push(index);
+          return closedLedger(index, []);
+        },
+      },
+      log: silentLog,
+    });
+    assert.equal(result.skipped, false);
+    assert.deepEqual(requested, [11, 12, 13]);
+    assert.equal(result.applied, 3);
+    assert.equal(getLatestLedgerIndex(db), 13);
+    assert.equal(readLiveGap(db), null);
+  });
+});
+
 describe('runDedicatedBackfill', () => {
   it('keeps live subscribe on XAHAUD_URL and fetches history from JSON-RPC', async () => {
     const requested: number[] = [];
@@ -630,6 +658,83 @@ describe('runDedicatedBackfill', () => {
       });
       assert.equal(result.skipped, false);
       assert.deepEqual(requested, [12, 11]);
+      assert.equal(getIndexerState(db, 'backfill_status'), 'complete');
+    } finally {
+      await new Promise<void>((resolve, reject) => {
+        server.close((error) => {
+          if (error) {
+            reject(error);
+            return;
+          }
+          resolve();
+        });
+      });
+    }
+  });
+
+  it('fills the live subscribe gap on the history node before walking backward', async () => {
+    const requested: number[] = [];
+    const server = createServer((req, res) => {
+      const chunks: Buffer[] = [];
+      req.on('data', (chunk) => {
+        chunks.push(chunk);
+      });
+      req.on('end', () => {
+        const body = JSON.parse(Buffer.concat(chunks).toString()) as {
+          method?: string;
+          params: Array<{ ledger_index?: number }>;
+        };
+        if (body.method === 'server_info') {
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ result: { info: { complete_ledgers: '1-20' } } }));
+          return;
+        }
+        const index = body.params[0]?.ledger_index ?? 0;
+        requested.push(index);
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(
+          JSON.stringify({
+            result: {
+              status: 'success',
+              ledger_index: index,
+              ledger_hash: 'a'.repeat(64),
+              ledger: {
+                ledger_index: index,
+                close_time: 738_000_000,
+                transactions: [],
+              },
+            },
+          }),
+        );
+      });
+    });
+    await new Promise<void>((resolve) => {
+      server.listen(0, '127.0.0.1', resolve);
+    });
+    const { port } = server.address() as AddressInfo;
+    const db = memoryDb();
+    seedSnapshot(db, 10);
+    setIndexerState(db, LIVE_GAP_FROM, '11');
+    setIndexerState(db, LIVE_GAP_THROUGH, '12');
+    setIndexerState(db, LIVE_GAP_NEXT, '11');
+    try {
+      const result = await runDedicatedBackfill({
+        db,
+        liveSource: {
+          getLedgerWithTransactions: async () => {
+            throw new Error('live node should not serve backfill');
+          },
+        },
+        config: testConfig({
+          xahaudUrl: 'wss://live.example',
+          backfillFromLedger: 10,
+          backfillXahaudUrl: `http://127.0.0.1:${port}`,
+        }),
+        log: silentLog,
+      });
+      assert.equal(result.skipped, false);
+      assert.deepEqual(requested, [11, 12, 10]);
+      assert.equal(getLatestLedgerIndex(db), 12);
       assert.equal(getIndexerState(db, 'backfill_status'), 'complete');
     } finally {
       await new Promise<void>((resolve, reject) => {

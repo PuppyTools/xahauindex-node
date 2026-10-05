@@ -13,6 +13,7 @@ import {
   resolveBackfillFrom,
   resolveBackfillMinIntervalMs,
   resolveBackfillSourceUrl,
+  resolveGapFillMinIntervalMs,
   resolveWsBaseUrl,
   resolveWsMaxPerIp,
   rewriteDocsBaseUrl,
@@ -132,14 +133,17 @@ describe('loadConfig', () => {
     assert.equal(fallback.backfillMinIntervalMs, null);
     assert.equal(resolveBackfillMinIntervalMs(fallback, false), SHARED_BACKFILL_INTERVAL_MS);
     assert.equal(resolveBackfillMinIntervalMs(fallback, true), 0);
+    assert.equal(resolveGapFillMinIntervalMs(fallback), SHARED_BACKFILL_INTERVAL_MS);
   });
 
   it('reads BACKFILL_MIN_INTERVAL_MS including zero', () => {
     const paced = loadConfig({ BACKFILL_MIN_INTERVAL_MS: '250' });
     assert.equal(paced.backfillMinIntervalMs, 250);
     assert.equal(resolveBackfillMinIntervalMs(paced, true), 250);
+    assert.equal(resolveGapFillMinIntervalMs(paced), 250);
     const off = loadConfig({ BACKFILL_MIN_INTERVAL_MS: '0' });
     assert.equal(resolveBackfillMinIntervalMs(off, false), 0);
+    assert.equal(resolveGapFillMinIntervalMs(off), 0);
   });
 
   it('reads the backfill node from a second env file', () => {

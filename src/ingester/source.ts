@@ -26,10 +26,49 @@ export interface LedgerSource {
   reconnect?(): Promise<void>;
 }
 
+export interface LedgerRange {
+  from: number;
+  to: number;
+}
+
+export function parseCompleteLedgers(raw: string | null | undefined): LedgerRange[] {
+  if (raw === undefined || raw === null) {
+    return [];
+  }
+  const trimmed = raw.trim();
+  if (trimmed === '' || trimmed === 'empty') {
+    return [];
+  }
+  const ranges: LedgerRange[] = [];
+  for (const part of trimmed.split(',')) {
+    const piece = part.trim();
+    if (piece === '') {
+      continue;
+    }
+    const dash = piece.indexOf('-');
+    const fromRaw = dash === -1 ? piece : piece.slice(0, dash);
+    const toRaw = dash === -1 ? piece : piece.slice(dash + 1);
+    const from = Number.parseInt(fromRaw, 10);
+    const to = Number.parseInt(toRaw, 10);
+    if (Number.isInteger(from) && Number.isInteger(to) && from > 0 && to >= from) {
+      ranges.push({ from, to });
+    }
+  }
+  return ranges;
+}
+
+export function completeRangeContaining(
+  ranges: readonly LedgerRange[],
+  index: number,
+): LedgerRange | null {
+  return ranges.find((range) => index >= range.from && index <= range.to) ?? null;
+}
+
 export interface LiveLedgerSource extends LedgerSource {
   getLedgerWithTransactions(ledgerIndex: number): Promise<ClosedLedger>;
   subscribeLedgers(): Promise<void>;
   onLedgerClosed(handler: (ledger: ValidatedLedger) => void): () => void;
+  getCompleteLedgers?(): Promise<string | null>;
   quota?: NodeQuota;
 }
 
@@ -130,6 +169,22 @@ export function createJsonRpcSource(url: string): XahauSource {
       throw new Error('JSON-RPC backfill source does not page ledger_data');
     },
     getLedgerWithTransactions: async (ledgerIndex) => requestLedger(ledgerIndex),
+    getCompleteLedgers: async () => {
+      const response = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ method: 'server_info', params: [{}] }),
+        signal: AbortSignal.timeout(15_000),
+      });
+      if (!response.ok) {
+        throw new Error(`JSON-RPC ${response.status} from ${url}`);
+      }
+      const body = (await response.json()) as {
+        result?: { info?: { complete_ledgers?: unknown } };
+      };
+      const raw = body.result?.info?.complete_ledgers;
+      return typeof raw === 'string' ? raw : null;
+    },
     subscribeLedgers: async () => {
       throw new Error('JSON-RPC backfill source does not subscribe');
     },
@@ -234,6 +289,11 @@ export function createXahauSource(url: string): XahauSource {
       const closeTime = unixSecondsFromRipple(Number(ledger.close_time ?? 0));
       const transactions = Array.isArray(ledger.transactions) ? ledger.transactions : [];
       return { index, hash, closeTime, transactions };
+    },
+    getCompleteLedgers: async () => {
+      const response = await client.request({ command: 'server_info' });
+      const info = response.result.info as { complete_ledgers?: unknown };
+      return typeof info.complete_ledgers === 'string' ? info.complete_ledgers : null;
     },
     subscribeLedgers: async () => {
       client.off('ledgerClosed', onClosed);
