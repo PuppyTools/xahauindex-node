@@ -1,0 +1,350 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>XahauIndex node</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 116 92'%3E%3Cpath fill='%232ee6a6' d='M44.16 62.96 30.95 85.21H5.9L31.62 44.66 5 6.01h25.95L45.89 27.8 58.69 6.01h25.05L58.36 45.89 68.3 60.33 44.21 62.87z'/%3E%3Cpath fill='%232ee6a6' d='M52.45 75 59.48 85.21h25.95l-8.49-12.33z'/%3E%3Cpath fill='%232ee6a6' d='M87.59 6.01h22.02v49.97L87.59 58.3z'/%3E%3Cpath fill='%232ee6a6' d='M87.59 71.96 109.6 70.06v15.15H87.59z'/%3E%3C/svg%3E" />
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+  <style>
+    :root {
+      --bg: #07120f;
+      --panel: #10241f;
+      --line: rgba(46, 230, 166, 0.14);
+      --text: #e8f7f0;
+      --muted: #8fb3a6;
+      --teal: #2ee6a6;
+      --amber: #f0c14b;
+      --rose: #ff7a88;
+      --blue: #8fd4ff;
+      --shadow: 0 24px 60px rgba(0, 0, 0, 0.35);
+    }
+    * { box-sizing: border-box; }
+    html { overflow-x: clip; }
+    body {
+      margin: 0;
+      color: var(--text);
+      font: 16px/1.55 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+      background:
+        radial-gradient(1200px 600px at 80% -10%, rgba(46, 230, 166, 0.12), transparent 55%),
+        radial-gradient(900px 500px at -10% 20%, rgba(143, 212, 255, 0.08), transparent 50%),
+        linear-gradient(180deg, var(--bg) 0%, #050d0b 100%);
+      min-height: 100vh;
+    }
+    body::before {
+      content: "";
+      position: fixed;
+      inset: 0;
+      pointer-events: none;
+      background-image:
+        linear-gradient(rgba(46, 230, 166, 0.035) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(46, 230, 166, 0.035) 1px, transparent 1px);
+      background-size: 48px 48px;
+      mask-image: radial-gradient(ellipse at 30% 0%, #000 20%, transparent 70%);
+    }
+    a { color: var(--teal); text-decoration: none; }
+    a:hover { text-decoration: underline; }
+    .wrap { position: relative; max-width: 880px; margin: 0 auto; padding: 36px 22px 64px; }
+    .brand { display: flex; gap: 14px; align-items: center; margin-bottom: 28px; }
+    .mark { width: 64px; height: 50px; flex: none; }
+    .brand h1 { margin: 0; font-size: 22px; letter-spacing: -0.03em; }
+    .brand p { margin: 2px 0 0; color: var(--muted); font-size: 14px; }
+    .kicker {
+      color: var(--teal); font-size: 13px; letter-spacing: 0.08em;
+      text-transform: uppercase; margin-bottom: 10px;
+    }
+    h2 {
+      margin: 0 0 12px; font-size: clamp(28px, 5vw, 40px);
+      letter-spacing: -0.04em; line-height: 1.15;
+    }
+    .lede { margin: 0 0 22px; color: var(--muted); font-size: 17px; max-width: 38em; }
+    .pills { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 28px; }
+    .pill {
+      display: inline-flex; align-items: center; gap: 8px;
+      padding: 7px 12px; border-radius: 999px;
+      border: 1px solid var(--line); background: rgba(16, 36, 31, 0.85); font-size: 13px;
+    }
+    .pill b { font-weight: 600; color: var(--muted); }
+    .dot {
+      width: 8px; height: 8px; border-radius: 50%; background: var(--teal);
+      box-shadow: 0 0 10px var(--teal);
+    }
+    .dot.warn { background: var(--amber); box-shadow: 0 0 10px var(--amber); }
+    .dot.bad { background: var(--rose); box-shadow: 0 0 10px var(--rose); }
+    .grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin-bottom: 18px; }
+    .card {
+      padding: 16px 18px; border-radius: 16px; border: 1px solid var(--line);
+      background: var(--panel); box-shadow: var(--shadow);
+    }
+    .card.wide { grid-column: 1 / -1; }
+    .label {
+      color: var(--muted); font-size: 12px; letter-spacing: 0.06em;
+      text-transform: uppercase; margin-bottom: 6px;
+    }
+    .value { font-size: 22px; letter-spacing: -0.03em; overflow-wrap: break-word; }
+    .value.small { font-size: 16px; }
+    .hint { color: var(--muted); font-size: 13px; margin-top: 6px; }
+    .chart-head { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; flex-wrap: wrap; }
+    .chart-wrap { position: relative; height: 240px; margin-top: 8px; }
+    .note, .access, footer {
+      border: 1px solid var(--line); background: rgba(11, 26, 22, 0.72);
+      border-radius: 16px; padding: 16px 18px;
+    }
+    .access { margin: 12px 0; }
+    .access h3, .note h3 { margin: 0 0 8px; font-size: 15px; }
+    .access p, .note p, footer { margin: 0; color: var(--muted); font-size: 14px; }
+    .access ul { margin: 8px 0 0; padding-left: 1.1em; color: var(--muted); font-size: 14px; }
+    footer { margin-top: 18px; }
+    @media (max-width: 640px) {
+      .grid { grid-template-columns: 1fr; }
+      .wrap { padding: 24px 16px 48px; }
+      .value { font-size: 20px; }
+    }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="brand">
+      <svg class="mark" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 116 92" fill="none" aria-hidden="true">
+        <path fill="#2ee6a6" d="M44.1611 62.9598 44.0897 62.856 30.9475 85.2136H5.89861L31.6214 44.6553 5 6.00705H30.9475L45.8869 27.8029 58.6921 6.00705H83.741L58.3552 45.8912 68.2984 60.3346 44.2123 62.8729 44.1611 62.9598Z"/>
+        <path fill="#2ee6a6" d="M52.4465 74.9972 59.4784 85.2136H85.4259L76.9363 72.8818Z"/>
+        <path fill="#2ee6a6" d="M87.5859 6.007H109.6019V55.9819L87.5859 58.302Z"/>
+        <path fill="#2ee6a6" d="M87.5859 71.9619 109.6019 70.0602V85.2136H87.5859Z"/>
+      </svg>
+      <div>
+        <h1>XahauIndex</h1>
+        <p>node.xahauindex.dev</p>
+      </div>
+    </div>
+
+    <div class="kicker">Live xahaud · PuppyTools</div>
+    <h2>The xahaud behind this index</h2>
+    <p class="lede">
+      This machine stays at the Xahau tip so
+      <a href="https://xahauindex.dev">XahauIndex</a>
+      can subscribe without asking a public websocket for every new ledger.
+      It is a short-history live node, not a full-history archive.
+    </p>
+
+    <div class="pills">
+      <span class="pill"><span class="dot" id="sync-dot"></span> <b>Sync</b> <span id="sync">loading…</span></span>
+      <span class="pill"><b>Role</b> live subscribe</span>
+      <span class="pill"><b>History</b> <span id="history">…</span></span>
+    </div>
+
+    <div class="grid">
+      <div class="card">
+        <div class="label">Validated ledger</div>
+        <div class="value" id="ledger">—</div>
+      </div>
+      <div class="card">
+        <div class="label">Peers</div>
+        <div class="value" id="peers">—</div>
+      </div>
+      <div class="card wide">
+        <div class="label">Ledgers on disk</div>
+        <div class="value small" id="complete">—</div>
+        <div class="hint">Sliding window on this box. Genesis → tip lives on the indexer and a history node, not here.</div>
+      </div>
+      <div class="card">
+        <div class="label">Uptime</div>
+        <div class="value small" id="uptime">—</div>
+      </div>
+      <div class="card">
+        <div class="label">Build</div>
+        <div class="value small" id="build">—</div>
+      </div>
+      <div class="card wide">
+        <div class="chart-head">
+          <div>
+            <div class="label" style="margin:0">Host load</div>
+            <div class="hint" id="refresh">Waiting for xahau.toml…</div>
+          </div>
+        </div>
+        <div class="chart-wrap"><canvas id="load-chart"></canvas></div>
+      </div>
+    </div>
+
+    <div class="access">
+      <h3>Public access</h3>
+      <p>Websocket and JSON-RPC are not open to the internet. The indexer at xahauindex.dev is allowlisted.</p>
+      <ul>
+        <li>API and docs: <a href="https://xahauindex.dev">xahauindex.dev</a></li>
+        <li>This host is xahaud only. It is not the XahauIndex API.</li>
+      </ul>
+    </div>
+
+    <div class="note">
+      <h3>Affiliation</h3>
+      <p>
+        XahauIndex is an independent PuppyTools project. It is not affiliated with, endorsed by, or a product of the Xahau network or its operators.
+        The XI mark is original artwork inspired by
+        <a href="https://github.com/Xahau/Graphics">Xahau/Graphics</a>.
+      </p>
+    </div>
+
+    <footer>
+      Status and host load refresh from this node’s <code>/.well-known/xahau.toml</code>.
+      xahaud reports <code>server_state: full</code> when it is caught up — that is not full history.
+      Donations in XAH: <code>rPUPpkfohJsWVoXoXDbNZ7zKfk2FBB8Xwo</code>
+    </footer>
+  </div>
+  <script>
+    const $ = (id) => document.getElementById(id);
+
+    function parseValue(value) {
+      if (value.startsWith('"') && value.endsWith('"')) return value.slice(1, -1);
+      if (value === "true" || value === "false") return value === "true";
+      if (value !== "" && !Number.isNaN(Number(value))) return Number(value);
+      return value;
+    }
+
+    function parseTOML(tomlString) {
+      const json = {};
+      let current = json;
+      for (const raw of tomlString.split("\n")) {
+        const line = raw.split("#")[0].trim();
+        if (!line) continue;
+        if (line.startsWith("[")) {
+          const section = line.replace(/[\[\]]/g, "");
+          json[section] = {};
+          current = json[section];
+        } else {
+          const eq = line.indexOf("=");
+          if (eq === -1) continue;
+          current[line.slice(0, eq).trim()] = parseValue(line.slice(eq + 1).trim());
+        }
+      }
+      return json;
+    }
+
+    function parseSeries(raw) {
+      if (Array.isArray(raw)) return raw.map(Number).filter(Number.isFinite);
+      if (raw === undefined || raw === null) return [];
+      return String(raw)
+        .replace(/^[\[\s]+|[\]\s]+$/g, "")
+        .split(",")
+        .map((part) => Number(part.trim()))
+        .filter(Number.isFinite);
+    }
+
+    function parseLabels(raw) {
+      if (Array.isArray(raw)) return raw.map(String);
+      if (raw === undefined || raw === null) return [];
+      return String(raw)
+        .replace(/^[\[\s]+|[\]\s]+$/g, "")
+        .split(",")
+        .map((part) => part.trim().replace(/^["']|["']$/g, ""));
+    }
+
+    function ledgerLabel(value) {
+      const n = Number(String(value).replace(/[^0-9]/g, ""));
+      return Number.isInteger(n) && n > 0 ? n.toLocaleString("en-US") : "—";
+    }
+
+    function parseRange(raw) {
+      const text = String(raw ?? "").trim();
+      const match = text.match(/(\d+)\s*-\s*(\d+)/);
+      if (!match) return { label: text || "—", from: null, to: null };
+      return {
+        from: Number(match[1]),
+        to: Number(match[2]),
+        label: Number(match[1]).toLocaleString("en-US") + " – " + Number(match[2]).toLocaleString("en-US"),
+      };
+    }
+
+    function syncCopy(state) {
+      const s = String(state || "").toLowerCase();
+      if (s === "full") return { label: "caught up", tone: "ok" };
+      if (s === "syncing" || s === "tracking") return { label: s, tone: "warn" };
+      if (s === "connected") return { label: "connected", tone: "warn" };
+      if (s === "disconnected" || s === "offline") return { label: "offline", tone: "bad" };
+      return { label: state || "unknown", tone: "warn" };
+    }
+
+    function ago(raw) {
+      if (!raw) return "refresh time unknown";
+      const when = new Date(String(raw).replace(" UTC", "Z"));
+      if (Number.isNaN(when.getTime())) return String(raw);
+      const mins = Math.max(0, Math.round((Date.now() - when.getTime()) / 60000));
+      if (mins < 1) return "updated just now";
+      if (mins < 60) return "updated " + mins + " min ago";
+      const hours = Math.floor(mins / 60);
+      if (hours < 48) return "updated " + hours + "h ago";
+      return "updated " + Math.floor(hours / 24) + "d ago";
+    }
+
+    function setText(id, value) {
+      $(id).textContent = value;
+    }
+
+    function line(label, data, color) {
+      return {
+        label,
+        data,
+        borderColor: color,
+        backgroundColor: "transparent",
+        borderWidth: 2,
+        pointRadius: 0,
+        tension: 0.25,
+      };
+    }
+
+    async function load() {
+      const response = await fetch(".well-known/xahau.toml", { cache: "no-store" });
+      if (!response.ok) throw new Error("toml " + response.status);
+      const parsed = parseTOML(await response.text());
+      const status = parsed.STATUS || {};
+      const sync = syncCopy(status.STATUS);
+      const range = parseRange(status.SAVED_LEDGERS);
+      const history = range.from !== null && range.from <= 1 ? "full history on disk" : "recent ledgers only";
+
+      $("sync-dot").className = "dot" + (sync.tone === "ok" ? "" : sync.tone === "bad" ? " bad" : " warn");
+      setText("sync", sync.label);
+      setText("history", history);
+      setText("ledger", ledgerLabel(status.CURRENTLEDGER));
+      setText("peers", status.PEERS === undefined || status.PEERS === "" ? "—" : String(status.PEERS));
+      setText("complete", range.label);
+      setText("uptime", status.UPTIME || "—");
+      setText("build", status.BUILDVERSION || "—");
+      setText("refresh", ago(status.LASTREFRESH));
+
+      const labels = parseLabels(status.TIME);
+      const cpu = parseSeries(status.CPU);
+      const ram = parseSeries(status.RAM);
+      const hdd = parseSeries(status.HDD);
+      if (typeof Chart === "undefined") return;
+      const ctx = $("load-chart");
+      if (ctx._chart) ctx._chart.destroy();
+      ctx._chart = new Chart(ctx, {
+        type: "line",
+        data: {
+          labels: labels.length ? labels : cpu.map((_, i) => String(i)),
+          datasets: [
+            line("CPU %", cpu, "#2ee6a6"),
+            line("RAM %", ram, "#8fd4ff"),
+            line("Disk %", hdd, "#f0c14b"),
+          ].filter((set) => set.data.length > 0),
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          plugins: {
+            legend: { labels: { color: "#8fb3a6", boxWidth: 10 } },
+          },
+          scales: {
+            x: { ticks: { color: "#8fb3a6", maxTicksLimit: 8 }, grid: { color: "rgba(46,230,166,0.08)" } },
+            y: { beginAtZero: true, suggestedMax: 100, ticks: { color: "#8fb3a6" }, grid: { color: "rgba(46,230,166,0.08)" } },
+          },
+        },
+      });
+    }
+
+    load().catch((error) => {
+      setText("sync", "unavailable");
+      $("sync-dot").className = "dot bad";
+      setText("refresh", error instanceof Error ? error.message : "could not read xahau.toml");
+    });
+  </script>
+</body>
+</html>
