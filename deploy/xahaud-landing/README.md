@@ -2,19 +2,27 @@
 
 Drop-in replacement for the public xahl-node landing page on `node.xahauindex.dev`.
 
-It still reads `/.well-known/xahau.toml` that xahl-node already refreshes. Leave the toml writer and nginx allowlist alone. Only replace the HTML.
+It still reads `/.well-known/xahau.toml` that xahl-node already refreshes. Leave the toml writer, nginx allowlist, and websocket/RPC restrictions alone. Only replace the HTML.
 
 ## Install on the node host
 
-1. Find the file nginx serves for `/` on `node.xahauindex.dev` (often the xahl-node `website/index.html`).
-2. Back it up:
+Find the file nginx serves for `/`:
 
 ```bash
-sudo cp /path/to/index.html /path/to/index.html.xahl-bak
+sudo nginx -T 2>/dev/null | grep -nE 'root |index '
+# often: /opt/xahl-node/website/index.html
 ```
 
-3. Copy `index.html` from this folder over that file.
-4. Hard-refresh `https://node.xahauindex.dev`.
+Back it up, then drop this file in:
+
+```bash
+PAGE=/opt/xahl-node/website/index.html
+sudo cp "$PAGE" "${PAGE}.xahl-bak"
+sudo curl -fsSL -o "$PAGE" \
+  https://raw.githubusercontent.com/PuppyTools/xahauindex-node/cursor/xahaud-landing-5c2e/deploy/xahaud-landing/index.html
+```
+
+Hard-refresh `https://node.xahauindex.dev`.
 
 Do not put this page on the indexer (`xahauindex.dev`). That host is the API.
 
