@@ -152,6 +152,10 @@ describe('holders, prices, and trades routes', () => {
     assert.equal(allXah.json().data.length, 2);
     assert.equal(allXah.json().meta.count, 2);
 
+    const clamped = await app.inject({ method: 'GET', url: '/v1/trades/XAH?page=1&per_page=999' });
+    assert.equal(clamped.statusCode, 200);
+    assert.equal(clamped.json().meta.per_page, 250);
+
     const usd = await app.inject({ method: 'GET', url: `/v1/trades/USD?issuer=${ISSUER}` });
     assert.equal(usd.statusCode, 200);
     assert.equal(usd.json().data.length, 2);
