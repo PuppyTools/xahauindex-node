@@ -439,9 +439,9 @@ CREATE INDEX ohlcv_pair_period ON ohlcv_candles(
 
 ### Pagination
 
-List endpoints: `?page=1&per_page=20` (max 100).
+List endpoints: `?page=1&per_page=20` (max 250).
 
-Price/trade range: `from`, `to` (unix seconds), `from_ledger`, `to_ledger`, `limit` (max 500). If both time and ledger ranges are set, both constraints apply (AND). Without a range, return the latest `limit` rows.
+Price/trade range: `from`, `to` (unix seconds), `from_ledger`, `to_ledger`, `limit` (max 1000). If both time and ledger ranges are set, both constraints apply (AND). Without a range, return the latest `limit` rows.
 
 ### WebSocket
 

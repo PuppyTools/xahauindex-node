@@ -176,11 +176,11 @@ components:
     per_page:
       name: per_page
       in: query
-      description: Rows per page (1–100). Default 20
+      description: Rows per page (1–250). Default 20
       schema:
         type: integer
         minimum: 1
-        maximum: 100
+        maximum: 250
         default: 20
     sort_tokens:
       name: sort
@@ -273,7 +273,7 @@ components:
       schema:
         type: integer
         minimum: 1
-        maximum: 500
+        maximum: 1000
         default: 100
 
   schemas:

@@ -1,3 +1,8 @@
+export const DEFAULT_PER_PAGE = 20;
+export const MAX_PER_PAGE = 250;
+export const DEFAULT_LIMIT = 100;
+export const MAX_LIMIT = 1000;
+
 export function parsePage(raw: unknown, fallback = 1): number {
   const value = typeof raw === 'string' ? Number.parseInt(raw, 10) : typeof raw === 'number' ? raw : fallback;
   if (!Number.isInteger(value) || value < 1) {
@@ -6,7 +11,7 @@ export function parsePage(raw: unknown, fallback = 1): number {
   return value;
 }
 
-export function parsePerPage(raw: unknown, fallback = 20, max = 100): number {
+export function parsePerPage(raw: unknown, fallback = DEFAULT_PER_PAGE, max = MAX_PER_PAGE): number {
   const value = typeof raw === 'string' ? Number.parseInt(raw, 10) : typeof raw === 'number' ? raw : fallback;
   if (!Number.isInteger(value) || value < 1) {
     return fallback;
@@ -38,7 +43,7 @@ export function parseOptionalInt(raw: unknown): number | undefined {
   return value;
 }
 
-export function parseLimit(raw: unknown, fallback = 100, max = 500): number {
+export function parseLimit(raw: unknown, fallback = DEFAULT_LIMIT, max = MAX_LIMIT): number {
   const value = parseOptionalInt(raw);
   if (value === undefined || value < 1) {
     return fallback;
