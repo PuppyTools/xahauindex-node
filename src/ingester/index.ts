@@ -12,6 +12,7 @@ import {
 import type { SqliteDatabase } from '../db/client.js';
 import type { Runtime } from '../runtime.js';
 import { fillLiveGap, runBackfill, type BackfillResult } from './backfill.js';
+import { runCatalogueImport } from './catalogueImport.js';
 import { runHistoryDbImport } from './historyDb.js';
 import { snapshotLedgerBound } from './ledger.js';
 import {
@@ -216,6 +217,21 @@ export async function runDedicatedBackfill(options: {
           throw options.signal.reason ?? error;
         }
         options.log.error({ err: error }, 'history DB import failed; continuing with RPC backfill');
+      }
+    }
+    if (options.config.historyCatalogue !== null) {
+      try {
+        await runCatalogueImport({
+          db: options.db,
+          config: options.config,
+          log: options.log,
+          ...(options.signal === undefined ? {} : { signal: options.signal }),
+        });
+      } catch (error) {
+        if (options.signal?.aborted) {
+          throw options.signal.reason ?? error;
+        }
+        options.log.error({ err: error }, 'catalogue import failed; continuing with RPC backfill');
       }
     }
     return await runBackfill({

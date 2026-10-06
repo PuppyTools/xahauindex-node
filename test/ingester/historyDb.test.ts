@@ -266,6 +266,7 @@ describe('loadConfig history DB', () => {
     assert.equal(config.historyFromDb, false);
     assert.equal(config.historyLedgerDb, null);
     assert.equal(config.historyTxDb, null);
+    assert.equal(config.historyCatalogue, null);
     assert.equal(config.historyBatchSize, DEFAULT_HISTORY_BATCH_SIZE);
     assert.equal(config.historyWorkers, DEFAULT_HISTORY_WORKERS);
   });
