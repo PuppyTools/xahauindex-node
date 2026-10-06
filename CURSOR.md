@@ -152,6 +152,7 @@ Copy `.env.example` to `.env`. Never commit `.env`.
 - `BACKFILL_CONCURRENCY` — in-flight historical RPC fetches on a dedicated `BACKFILL_XAHAUD_URL`. Default `1`, cap `32`. Sharing `XAHAUD_URL` always uses `1`. Fetch starts are staggered by `BACKFILL_MIN_INTERVAL_MS`. A `tooBusy` / units-quota 429 drops in-flight to 1 until a few fetches succeed. Apply stays in ledger order. File import is unchanged (`HISTORY_WORKERS` is decode stripes only).
 - `BACKFILL_FROM_DB` — optional. After snapshot + live gap fill, import a copy of xahaud `ledger.db` + `transaction.db`. RPC then fills only the remainder.
 - `HISTORY_LEDGER_DB` / `HISTORY_TX_DB` — required when `BACKFILL_FROM_DB` is set. Read-only copy; never a live node's files.
+- `HISTORY_CATALOGUE` — optional path to one xahaud CATL file. After snapshot + live gap fill (and after the SQLite dump if set), stream DEX/URIToken history from it. Sequential files: change the path and restart; imported range is unioned. Do not `catalogue_load` into a live / BARB node.
 - `HISTORY_BATCH_SIZE` — default `500`.
 - `HISTORY_WORKERS` — decode stripes / event-loop yield. Default `4`.
 - `API_RATE_LIMIT_MAX` — optional HTTP requests per IP per window. Unset / `0` = off. No API keys.

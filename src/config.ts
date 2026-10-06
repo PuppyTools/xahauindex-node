@@ -62,6 +62,8 @@ export interface Config {
   historyFromDb: boolean;
   historyLedgerDb: string | null;
   historyTxDb: string | null;
+  /** One xahaud CATL catalogue file to import after snapshot, or null. */
+  historyCatalogue: string | null;
   /** Ledgers per read batch from the history files. */
   historyBatchSize: number;
   /** Decode stripes (yields to the event loop so live subscribe stays responsive). */
@@ -327,10 +329,10 @@ export function rewriteDocsBaseUrl(text: string, baseUrl: string): string {
     .replaceAll(resolveWsBaseUrl(DEFAULT_API_BASE_URL), resolveWsBaseUrl(baseUrl));
 }
 
-function readExistingFilePath(env: NodeJS.ProcessEnv, key: string): string {
+function readOptionalExistingFilePath(env: NodeJS.ProcessEnv, key: string): string | null {
   const raw = env[key];
   if (raw === undefined || raw.trim() === '') {
-    throw new ConfigError(`${key} is required when BACKFILL_FROM_DB is set`);
+    return null;
   }
   const path = resolvePath(raw.trim());
   if (!existsSync(path)) {
@@ -339,21 +341,32 @@ function readExistingFilePath(env: NodeJS.ProcessEnv, key: string): string {
   return path;
 }
 
+function readExistingFilePath(env: NodeJS.ProcessEnv, key: string): string {
+  const path = readOptionalExistingFilePath(env, key);
+  if (path === null) {
+    throw new ConfigError(`${key} is required when BACKFILL_FROM_DB is set`);
+  }
+  return path;
+}
+
 function readHistoryImport(env: NodeJS.ProcessEnv): {
   historyFromDb: boolean;
   historyLedgerDb: string | null;
   historyTxDb: string | null;
+  historyCatalogue: string | null;
   historyBatchSize: number;
   historyWorkers: number;
 } {
   const historyFromDb = readBoolean(env, 'BACKFILL_FROM_DB', false);
   const historyBatchSize = readOptionalPositiveInt(env, 'HISTORY_BATCH_SIZE') ?? DEFAULT_HISTORY_BATCH_SIZE;
   const historyWorkers = readOptionalPositiveInt(env, 'HISTORY_WORKERS') ?? DEFAULT_HISTORY_WORKERS;
+  const historyCatalogue = readOptionalExistingFilePath(env, 'HISTORY_CATALOGUE');
   if (!historyFromDb) {
     return {
       historyFromDb,
       historyLedgerDb: null,
       historyTxDb: null,
+      historyCatalogue,
       historyBatchSize,
       historyWorkers,
     };
@@ -362,6 +375,7 @@ function readHistoryImport(env: NodeJS.ProcessEnv): {
     historyFromDb,
     historyLedgerDb: readExistingFilePath(env, 'HISTORY_LEDGER_DB'),
     historyTxDb: readExistingFilePath(env, 'HISTORY_TX_DB'),
+    historyCatalogue,
     historyBatchSize,
     historyWorkers,
   };
@@ -418,6 +432,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     historyFromDb: history.historyFromDb,
     historyLedgerDb: history.historyLedgerDb,
     historyTxDb: history.historyTxDb,
+    historyCatalogue: history.historyCatalogue,
     historyBatchSize: history.historyBatchSize,
     historyWorkers: history.historyWorkers,
   };

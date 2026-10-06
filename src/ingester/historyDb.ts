@@ -94,15 +94,22 @@ function dumpBounds(ledgerDb: Database.Database, txDb: Database.Database): Histo
 }
 
 export function historyImportedRange(db: SqliteDatabase): HistoryDbRange | null {
-  if (getIndexerState(db, HISTORY_DB_STATUS) !== 'complete') {
-    return null;
-  }
+  const status = getIndexerState(db, HISTORY_DB_STATUS);
   const from = parseStateInt(db, HISTORY_DB_FROM);
   const through = parseStateInt(db, HISTORY_DB_THROUGH);
   if (from === null || through === null || through < from) {
     return null;
   }
-  return { from, through };
+  if (status === 'complete') {
+    return { from, through };
+  }
+  if (status === 'running') {
+    const ledger = parseStateInt(db, HISTORY_DB_LEDGER);
+    if (ledger !== null && ledger >= from) {
+      return { from, through: Math.min(through, ledger) };
+    }
+  }
+  return null;
 }
 
 export function historyImportTargetRange(
