@@ -9,8 +9,15 @@ services:
     environment:
       DB_PATH: /data/xahauindex.db
       API_HOST: 0.0.0.0
+      # Host paths from .env are bind-mounted below; the process sees these container paths.
+      HISTORY_CATALOGUE: ${HISTORY_CATALOGUE:+/import/catalogue}
+      HISTORY_LEDGER_DB: ${HISTORY_LEDGER_DB:+/import/ledger.db}
+      HISTORY_TX_DB: ${HISTORY_TX_DB:+/import/transaction.db}
     volumes:
       - xahauindex_data:/data
+      - ${HISTORY_CATALOGUE:-./docker/empty-import}:/import/catalogue:ro
+      - ${HISTORY_LEDGER_DB:-./docker/empty-import}:/import/ledger.db:ro
+      - ${HISTORY_TX_DB:-./docker/empty-import}:/import/transaction.db:ro
     restart: unless-stopped
     healthcheck:
       test:

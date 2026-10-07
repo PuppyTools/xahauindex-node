@@ -1,0 +1,2 @@
+# Placeholder bind target when HISTORY_CATALOGUE / HISTORY_*_DB are unset.
+# docker-compose.yml mounts the host path from .env over /import/* when those vars are set.
