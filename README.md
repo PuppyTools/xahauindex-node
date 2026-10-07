@@ -40,6 +40,8 @@ docker compose up -d
 
 The API listens on `http://localhost:3000`. Docs are at `http://localhost:3000/docs`. Point a reverse proxy at that port for public access.
 
+History files stay on the host. Set `HISTORY_CATALOGUE` (and `HISTORY_LEDGER_DB` / `HISTORY_TX_DB` if you use the SQLite dump) to the host path in `.env` and run `docker compose up -d`. Compose bind-mounts those files; you do not edit `docker-compose.yml`. The indexer database stays on the named `/data` volume, not on the history disk.
+
 ### Node.js (development)
 
 ```bash
@@ -80,8 +82,8 @@ Historical backfill is **off** unless you set a stop bound, file import, or both
 | `BACKFILL_FROM_LEDGER` | Earliest ledger to walk down to. `genesis` / `start` = `1`. Alias: `FULL_HISTORY_START`. |
 | `BACKFILL_LOOKBACK` | Walk `LOOKBACK` ledgers back from the snapshot when `FROM` is unset. |
 | `BACKFILL_FROM_DB` | `true` to bulk-import a copy of xahaud `ledger.db` + `transaction.db` after snapshot + live gap fill. |
-| `HISTORY_LEDGER_DB` / `HISTORY_TX_DB` | Paths to those files (required when `BACKFILL_FROM_DB` is on). Read-only. Use a copy, not a live node's WAL. |
-| `HISTORY_CATALOGUE` | Path to one xahaud CATL catalogue (`catalogue_create`). Streamed after snapshot + live gap fill. Independent of `BACKFILL_FROM_DB`. |
+| `HISTORY_LEDGER_DB` / `HISTORY_TX_DB` | Paths to those files (required when `BACKFILL_FROM_DB` is on). Read-only. Use a copy, not a live node's WAL. In Docker, put the host paths here — Compose bind-mounts them. |
+| `HISTORY_CATALOGUE` | Path to one xahaud CATL catalogue (`catalogue_create`). Streamed after snapshot + live gap fill. Independent of `BACKFILL_FROM_DB`. In Docker, the host path is enough; Compose bind-mounts the file. |
 | `HISTORY_BATCH_SIZE` | Ledgers per read batch. Default `500`. |
 | `HISTORY_WORKERS` | Decode stripes / event-loop yield. Default `4`. |
 | `BACKFILL_XAHAUD_URL` | Dedicated full-history node (`ws`/`wss` or `http`/`https` JSON-RPC). Live subscribe stays on `XAHAUD_URL`. On start, this node fills the gap from last indexed → the subscribe tip first, then walks history backward (skipping ledgers already imported from files). |
