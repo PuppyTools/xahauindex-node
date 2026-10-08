@@ -63,6 +63,9 @@ describe('API docs', () => {
     assert.doesNotMatch(docs.body, /<span id="status"/);
     assert.match(docs.body, /id="range"/);
     assert.match(docs.body, /history_start_ledger/);
+    assert.match(docs.body, /ledger_ranges/);
+    assert.match(docs.body, /ledger_gaps/);
+    assert.match(docs.body, /data\.ledger_ranges/);
     assert.match(docs.body, /\/docs\/xi\.svg/);
     assert.match(docs.body, /rel="icon" href="\/docs\/favicon\.svg"/);
     assert.doesNotMatch(docs.body, /M24 3 43 14\.5/);

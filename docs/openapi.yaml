@@ -866,6 +866,28 @@ components:
           type: integer
           nullable: true
           description: Earliest ledger with collected history (backfill frontier while walking down, backfill_from when complete, else live_from_ledger)
+        ledger_ranges:
+          type: array
+          description: Inclusive contiguous islands this node has applied (file import, RPC history, snapshot+live). Built from ingest frontiers, not a scan of `ledgers`.
+          items:
+            type: object
+            required: [from, through]
+            properties:
+              from:
+                type: integer
+              through:
+                type: integer
+        ledger_gaps:
+          type: array
+          description: Holes between `ledger_ranges`. Does not include lag past the live tip.
+          items:
+            type: object
+            required: [from, through]
+            properties:
+              from:
+                type: integer
+              through:
+                type: integer
         backfill_status:
           type: string
           enum: [idle, running, complete]
@@ -921,6 +943,10 @@ components:
           snapshot_status: complete
           snapshot_ledger: 26272600
           history_start_ledger: 26272601
+          ledger_ranges:
+            - from: 26272600
+              through: 26272654
+          ledger_gaps: []
           backfill_status: idle
           backfill_from: null
           backfill_ledger: null

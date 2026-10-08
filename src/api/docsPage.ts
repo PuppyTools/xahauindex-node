@@ -501,7 +501,23 @@ export function renderDocsHtml(spec: OpenApiSpec, config?: Config): string {
     const rangeEl = document.getElementById('range');
     const dot = document.getElementById('dot');
     const ledgerLabel = (value) => Number(value).toLocaleString('en-US');
+    const spanLabel = (span) => {
+      const from = Number(span.from);
+      const through = Number(span.through);
+      if (!Number.isInteger(from) || !Number.isInteger(through) || from <= 0) {
+        return '';
+      }
+      if (from === through) {
+        return ledgerLabel(from);
+      }
+      return ledgerLabel(from) + ' – ' + ledgerLabel(through);
+    };
     const rangeLabel = (data) => {
+      const ranges = Array.isArray(data.ledger_ranges) ? data.ledger_ranges : [];
+      const labels = ranges.map(spanLabel).filter(Boolean);
+      if (labels.length > 0) {
+        return labels.join(' · ');
+      }
       const end = Number(data.ledger_index);
       const starts = [data.history_start_ledger, data.snapshot_ledger]
         .map((value) => Number(value))

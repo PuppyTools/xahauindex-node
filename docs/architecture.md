@@ -173,7 +173,9 @@ CREATE TABLE indexer_state (
 );
 ```
 
-Keys: `snapshot_status`, `snapshot_ledger`, `snapshot_marker`, `live_from_ledger`, `backfill_status`, `backfill_from`, `backfill_through`, `backfill_next`, `backfill_ledger`, `backfill_direction`, `history_db_status`, `history_db_from`, `history_db_through`, `history_db_next`, `history_db_ledger`, `history_catalogue_path`, `network_id`.
+Keys: `snapshot_status`, `snapshot_ledger`, `snapshot_marker`, `live_from_ledger`, `backfill_status`, `backfill_from`, `backfill_through`, `backfill_next`, `backfill_ledger`, `backfill_direction`, `history_db_status`, `history_db_from`, `history_db_through`, `history_db_next`, `history_db_ledger`, `history_catalogue_path`, `live_gap_from`, `live_gap_through`, `live_gap_next`, `network_id`.
+
+`GET /v1/status` `ledger_ranges` / `ledger_gaps` are merged from those frontiers (catalogue/SQLite import, RPC history walk, snapshot+live minus an open live gap). The docs Data Range pill prints `ledger_ranges`. This is not a scan of the `ledgers` table.
 
 ### `ledgers`
 

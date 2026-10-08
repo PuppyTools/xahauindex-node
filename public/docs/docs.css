@@ -121,7 +121,10 @@ a:hover { text-decoration: underline; }
   overflow-wrap: anywhere;
 }
 .status.range {
+  align-items: flex-start;
+  border-radius: 16px;
   font-variant-numeric: tabular-nums;
+  line-height: 1.45;
 }
 .dot {
   width: 8px;
