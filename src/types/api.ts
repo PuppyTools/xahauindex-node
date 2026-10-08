@@ -22,11 +22,20 @@ export type SnapshotStatus = 'pending' | 'running' | 'complete';
 export type BackfillStatus = 'idle' | 'running' | 'complete';
 export type IndexerHealth = 'syncing' | 'live' | 'degraded';
 
+export interface LedgerSpan {
+  from: number;
+  through: number;
+}
+
 export interface Status {
   status: IndexerHealth;
   snapshot_status: SnapshotStatus;
   snapshot_ledger: number | null;
   history_start_ledger: number | null;
+  /** Inclusive contiguous islands this node has applied. From ingest frontiers, not a table scan. */
+  ledger_ranges: LedgerSpan[];
+  /** Holes between `ledger_ranges` (exclusive of lag past the tip). */
+  ledger_gaps: LedgerSpan[];
   backfill_status: BackfillStatus;
   backfill_from: number | null;
   backfill_ledger: number | null;

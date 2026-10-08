@@ -2,6 +2,11 @@ import { Type } from 'typebox';
 
 import { MetaSchema } from './common.js';
 
+const LedgerSpanSchema = Type.Object({
+  from: Type.Integer(),
+  through: Type.Integer(),
+});
+
 export const StatusSchema = Type.Object({
   status: Type.Union([
     Type.Literal('syncing'),
@@ -15,6 +20,8 @@ export const StatusSchema = Type.Object({
   ]),
   snapshot_ledger: Type.Union([Type.Integer(), Type.Null()]),
   history_start_ledger: Type.Union([Type.Integer(), Type.Null()]),
+  ledger_ranges: Type.Array(LedgerSpanSchema),
+  ledger_gaps: Type.Array(LedgerSpanSchema),
   backfill_status: Type.Union([
     Type.Literal('idle'),
     Type.Literal('running'),
