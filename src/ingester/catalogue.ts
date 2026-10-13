@@ -1,11 +1,13 @@
-import { createReadStream } from 'node:fs';
-import { open } from 'node:fs/promises';
+import { createReadStream, readdirSync, statSync } from 'node:fs';
+import { open, type FileHandle } from 'node:fs/promises';
+import { join } from 'node:path';
 import { Readable } from 'node:stream';
 import { createInflate } from 'node:zlib';
 
 import { rippleTimeToUnixTime } from '@transia/xrpl';
 
 import { HISTORY_TX_TYPES, decodeHistoryTransaction } from './historyDecode.js';
+import { ZlibCatalogueInflate, zlibRandomAccessAvailable } from './zlibInflate.js';
 
 export const CATL_MAGIC = 0x4c_54_41_43;
 export const CATL_HEADER_SIZE = 88;
@@ -47,6 +49,21 @@ export interface CatalogueLedger {
   accountHash: string;
   closeTime: number;
   blobs: CatalogueTxBlob[];
+}
+
+export interface CatalogueCheckpoint {
+  path: string;
+  nextSeq: number;
+  prevAccountHash: string | null;
+  pending: Buffer;
+  inputOffset: number;
+  bits: number;
+  window: Buffer | null;
+}
+
+export interface CatalogueFile {
+  path: string;
+  header: CatlHeader;
 }
 
 export function parseCatlHeader(buf: Buffer): CatlHeader {
@@ -161,13 +178,118 @@ export function splitTxMeta(data: Buffer): { rawTxn: Buffer; txnMeta: Buffer | n
   return { rawTxn, txnMeta: data.subarray(metaStart, metaEnd) };
 }
 
+interface CataloguePayload {
+  readChunk(): Promise<Buffer | null>;
+  snapshot(): Promise<{ extra: Buffer; inputOffset: number; bits: number; window: Buffer | null }>;
+  destroy(): void;
+}
+
+class FileCataloguePayload implements CataloguePayload {
+  private pos: number;
+
+  constructor(
+    private readonly handle: FileHandle,
+    start: number,
+  ) {
+    this.pos = start;
+  }
+
+  async readChunk(): Promise<Buffer | null> {
+    const buf = Buffer.alloc(16_384);
+    const { bytesRead } = await this.handle.read(buf, 0, buf.length, this.pos);
+    if (bytesRead === 0) {
+      return null;
+    }
+    this.pos += bytesRead;
+    return bytesRead === buf.length ? buf : buf.subarray(0, bytesRead);
+  }
+
+  async snapshot(): Promise<{ extra: Buffer; inputOffset: number; bits: number; window: Buffer | null }> {
+    return { extra: Buffer.alloc(0), inputOffset: this.pos, bits: 0, window: null };
+  }
+
+  destroy(): void {
+    void this.handle.close();
+  }
+}
+
+class ZlibCataloguePayload implements CataloguePayload {
+  constructor(private readonly inflate: ZlibCatalogueInflate) {}
+
+  async readChunk(): Promise<Buffer | null> {
+    const chunk = await this.inflate.read(16_384);
+    return chunk.length === 0 ? null : chunk;
+  }
+
+  async snapshot(): Promise<{ extra: Buffer; inputOffset: number; bits: number; window: Buffer | null }> {
+    const { extra, point } = await this.inflate.snapshot();
+    return { extra, inputOffset: point.inputOffset, bits: point.bits, window: point.window };
+  }
+
+  destroy(): void {
+    this.inflate.close();
+  }
+}
+
+class StreamCataloguePayload implements CataloguePayload {
+  private readonly chunks: AsyncIterator<Buffer>;
+  private ended = false;
+
+  constructor(
+    private readonly payload: Readable,
+    private readonly stream: Readable,
+  ) {
+    this.chunks = stream[Symbol.asyncIterator]() as AsyncIterator<Buffer>;
+  }
+
+  async readChunk(): Promise<Buffer | null> {
+    if (this.ended) {
+      return null;
+    }
+    const next = await this.chunks.next();
+    if (next.done) {
+      this.ended = true;
+      return null;
+    }
+    return next.value;
+  }
+
+  async snapshot(): Promise<{ extra: Buffer; inputOffset: number; bits: number; window: Buffer | null }> {
+    return { extra: Buffer.alloc(0), inputOffset: CATL_HEADER_SIZE, bits: 0, window: null };
+  }
+
+  destroy(): void {
+    this.payload.destroy();
+    this.stream.destroy();
+  }
+}
+
 class ByteReader {
   private pending: Buffer = Buffer.alloc(0);
   private ended = false;
-  private readonly chunks: AsyncIterator<Buffer>;
 
-  constructor(stream: Readable) {
-    this.chunks = stream[Symbol.asyncIterator]() as AsyncIterator<Buffer>;
+  constructor(private readonly payload: CataloguePayload) {}
+
+  prepend(buf: Buffer): void {
+    if (buf.length === 0) {
+      return;
+    }
+    this.pending = this.pending.length === 0 ? buf : (Buffer.concat([buf, this.pending]) as Buffer);
+  }
+
+  append(buf: Buffer): void {
+    if (buf.length === 0) {
+      return;
+    }
+    this.pending = this.pending.length === 0 ? buf : (Buffer.concat([this.pending, buf]) as Buffer);
+  }
+
+  peekPending(): Buffer {
+    return this.pending;
+  }
+
+  async snapshot(): Promise<{ extra: Buffer; inputOffset: number; bits: number; window: Buffer | null }> {
+    return this.payload.snapshot();
   }
 
   async read(size: number): Promise<Buffer> {
@@ -175,12 +297,11 @@ class ByteReader {
       if (this.ended) {
         throw new CatalogueError('unexpected end of catalogue');
       }
-      const next = await this.chunks.next();
-      if (next.done) {
+      const chunk = await this.payload.readChunk();
+      if (chunk === null) {
         this.ended = true;
         break;
       }
-      const chunk = next.value;
       this.pending =
         this.pending.length === 0 ? chunk : (Buffer.concat([this.pending, chunk]) as Buffer);
     }
@@ -294,16 +415,91 @@ export async function readCatalogueHeader(path: string): Promise<CatlHeader> {
   }
 }
 
+export async function listCatalogueFiles(path: string): Promise<CatalogueFile[]> {
+  const info = statSync(path);
+  if (info.isFile()) {
+    return [{ path, header: await readCatalogueHeader(path) }];
+  }
+  if (!info.isDirectory()) {
+    throw new CatalogueError(`HISTORY_CATALOGUE is not a file or directory: ${path}`);
+  }
+  const names = readdirSync(path);
+  const files: CatalogueFile[] = [];
+  for (const name of names) {
+    const full = join(path, name);
+    let st;
+    try {
+      st = statSync(full);
+    } catch {
+      continue;
+    }
+    if (!st.isFile()) {
+      continue;
+    }
+    try {
+      files.push({ path: full, header: await readCatalogueHeader(full) });
+    } catch {
+      continue;
+    }
+  }
+  files.sort((a, b) => a.header.minLedger - b.header.minLedger || a.path.localeCompare(b.path));
+  if (files.length === 0) {
+    throw new CatalogueError(`HISTORY_CATALOGUE directory has no CATL files: ${path}`);
+  }
+  return files;
+}
+
+async function openCataloguePayload(
+  path: string,
+  header: CatlHeader,
+  resume: CatalogueCheckpoint | null,
+): Promise<CataloguePayload> {
+  const start = resume !== null && header.compressionLevel === 0 ? resume.inputOffset : CATL_HEADER_SIZE;
+  if (header.compressionLevel === 0) {
+    const handle = await open(path, 'r');
+    return new FileCataloguePayload(handle, start);
+  }
+  if (resume !== null && resume.window !== null && zlibRandomAccessAvailable()) {
+    const inflate = await ZlibCatalogueInflate.open(path, CATL_HEADER_SIZE, {
+      inputOffset: resume.inputOffset,
+      bits: resume.bits,
+      window: resume.window,
+    });
+    return new ZlibCataloguePayload(inflate);
+  }
+  if (zlibRandomAccessAvailable()) {
+    const inflate = await ZlibCatalogueInflate.open(path, CATL_HEADER_SIZE);
+    return new ZlibCataloguePayload(inflate);
+  }
+  const payload = createReadStream(path, { start: CATL_HEADER_SIZE });
+  const stream = payload.pipe(createInflate());
+  return new StreamCataloguePayload(payload, stream);
+}
+
 export async function* iterateCatalogueLedgers(
   path: string,
-  options?: { signal?: AbortSignal },
-): AsyncGenerator<{ header: CatlHeader; ledger: CatalogueLedger }> {
+  options?: { signal?: AbortSignal; resume?: CatalogueCheckpoint; decodeFrom?: number },
+): AsyncGenerator<{
+  header: CatlHeader;
+  ledger: CatalogueLedger;
+  checkpoint: () => Promise<CatalogueCheckpoint>;
+}> {
   const header = await readCatalogueHeader(path);
-  const payload = createReadStream(path, { start: CATL_HEADER_SIZE });
-  const stream = header.compressionLevel > 0 ? payload.pipe(createInflate()) : payload;
-  const reader = new ByteReader(stream);
-  let prevAccountHash: string | null = null;
-  let expected = header.minLedger;
+  const resume =
+    options?.resume !== undefined &&
+    options.resume.path === path &&
+    options.resume.nextSeq >= header.minLedger &&
+    options.resume.nextSeq <= header.maxLedger + 1
+      ? options.resume
+      : null;
+  const payload = await openCataloguePayload(path, header, resume);
+  const reader = new ByteReader(payload);
+  if (resume !== null && resume.pending.length > 0) {
+    reader.prepend(resume.pending);
+  }
+  let prevAccountHash = resume?.prevAccountHash ?? null;
+  let expected = resume?.nextSeq ?? header.minLedger;
+  const decodeFrom = options?.decodeFrom ?? header.minLedger;
   try {
     while (expected <= header.maxLedger) {
       if (options?.signal?.aborted) {
@@ -313,13 +509,21 @@ export async function* iterateCatalogueLedgers(
       if (info.seq !== expected) {
         throw new CatalogueError(`catalogue ledger ${info.seq} is out of sequence (expected ${expected})`);
       }
-      const first = expected === header.minLedger;
+      const first = prevAccountHash === null && expected === header.minLedger;
       const stateUnchanged = !first && prevAccountHash === info.accountHash;
       if (!stateUnchanged) {
         await skipShaMap(reader);
       }
-      const blobs = await readTxMap(reader);
+      let blobs: CatalogueTxBlob[] = [];
+      if (expected < decodeFrom) {
+        await skipShaMap(reader);
+      } else {
+        blobs = await readTxMap(reader);
+      }
       prevAccountHash = info.accountHash;
+      expected += 1;
+      const nextSeq = expected;
+      const accountHash = prevAccountHash;
       yield {
         header,
         ledger: {
@@ -329,11 +533,24 @@ export async function* iterateCatalogueLedgers(
           closeTime: info.closeTime,
           blobs,
         },
+        checkpoint: async () => {
+          const snap = await reader.snapshot();
+          if (snap.extra.length > 0) {
+            reader.append(snap.extra);
+          }
+          return {
+            path,
+            nextSeq,
+            prevAccountHash: accountHash,
+            pending: Buffer.from(reader.peekPending()),
+            inputOffset: snap.inputOffset,
+            bits: snap.bits,
+            window: snap.window,
+          };
+        },
       };
-      expected += 1;
     }
   } finally {
     payload.destroy();
-    stream.destroy();
   }
 }
