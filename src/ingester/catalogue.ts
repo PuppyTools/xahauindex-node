@@ -497,6 +497,7 @@ async function openCataloguePayload(
   path: string,
   header: CatlHeader,
   resume: CatalogueCheckpoint | null,
+  fromStart: 'libz' | 'node' = 'libz',
 ): Promise<CataloguePayload> {
   const start = resume !== null && header.compressionLevel === 0 ? resume.inputOffset : CATL_HEADER_SIZE;
   if (header.compressionLevel === 0) {
@@ -511,7 +512,10 @@ async function openCataloguePayload(
     });
     return new ZlibCataloguePayload(inflate);
   }
-  if (zlibRandomAccessAvailable()) {
+  // libz via koffi still ends the stream at skipUntil on large CATL files.
+  // Walk those catch-up scans with Node's inflate, which already imported
+  // this mill through the resume cursor.
+  if (fromStart === 'libz' && zlibRandomAccessAvailable()) {
     const inflate = await ZlibCatalogueInflate.open(path, CATL_HEADER_SIZE);
     return new ZlibCataloguePayload(inflate);
   }
@@ -547,7 +551,9 @@ export async function* iterateCatalogueLedgers(
     options.resume.nextSeq <= header.maxLedger + 1
       ? options.resume
       : null;
-  const payload = await openCataloguePayload(path, header, resume);
+  const skipUntil = options?.skipUntil ?? header.minLedger;
+  const fromStart = resume === null && skipUntil > header.minLedger ? 'node' : 'libz';
+  const payload = await openCataloguePayload(path, header, resume, fromStart);
   const reader = new ByteReader(payload);
   if (resume !== null && resume.pending.length > 0) {
     reader.prepend(resume.pending);
@@ -555,7 +561,6 @@ export async function* iterateCatalogueLedgers(
   let prevAccountHash = resume?.prevAccountHash ?? null;
   let expected = resume?.nextSeq ?? header.minLedger;
   const decodeFrom = options?.decodeFrom ?? header.minLedger;
-  const skipUntil = options?.skipUntil ?? header.minLedger;
   const skipCheckpointEvery = options?.skipCheckpointEvery ?? 50_000;
   let skipped = 0;
   try {
