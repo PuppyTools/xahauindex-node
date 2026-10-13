@@ -1,13 +1,11 @@
-import { createReadStream, readdirSync, statSync } from 'node:fs';
+import { readdirSync, statSync } from 'node:fs';
 import { open, type FileHandle } from 'node:fs/promises';
 import { join } from 'node:path';
-import { Readable } from 'node:stream';
-import { createInflate } from 'node:zlib';
 
 import { rippleTimeToUnixTime } from '@transia/xrpl';
 
 import { HISTORY_TX_TYPES, decodeHistoryTransaction } from './historyDecode.js';
-import { ZlibCatalogueInflate, zlibRandomAccessAvailable } from './zlibInflate.js';
+import { NodeZlibFileInflate, ZlibCatalogueInflate, zlibRandomAccessAvailable } from './zlibInflate.js';
 
 export const CATL_MAGIC = 0x4c_54_41_43;
 export const CATL_HEADER_SIZE = 88;
@@ -233,27 +231,12 @@ class ZlibCataloguePayload implements CataloguePayload {
   }
 }
 
-class StreamCataloguePayload implements CataloguePayload {
-  private readonly chunks: AsyncIterator<Buffer>;
-  private ended = false;
-
-  constructor(
-    private readonly payload: Readable,
-    private readonly stream: Readable,
-  ) {
-    this.chunks = stream[Symbol.asyncIterator]() as AsyncIterator<Buffer>;
-  }
+class NodeZlibCataloguePayload implements CataloguePayload {
+  constructor(private readonly inflate: NodeZlibFileInflate) {}
 
   async readChunk(): Promise<Buffer | null> {
-    if (this.ended) {
-      return null;
-    }
-    const next = await this.chunks.next();
-    if (next.done) {
-      this.ended = true;
-      return null;
-    }
-    return next.value;
+    const chunk = await this.inflate.read(PAYLOAD_CHUNK);
+    return chunk.length === 0 ? null : chunk;
   }
 
   async snapshot(): Promise<{ extra: Buffer; inputOffset: number; bits: number; window: Buffer | null }> {
@@ -261,8 +244,7 @@ class StreamCataloguePayload implements CataloguePayload {
   }
 
   destroy(): void {
-    this.payload.destroy();
-    this.stream.destroy();
+    this.inflate.close();
   }
 }
 
@@ -512,16 +494,12 @@ async function openCataloguePayload(
     });
     return new ZlibCataloguePayload(inflate);
   }
-  // libz via koffi still ends the stream at skipUntil on large CATL files.
-  // Walk those catch-up scans with Node's inflate, which already imported
-  // this mill through the resume cursor.
   if (fromStart === 'libz' && zlibRandomAccessAvailable()) {
     const inflate = await ZlibCatalogueInflate.open(path, CATL_HEADER_SIZE);
     return new ZlibCataloguePayload(inflate);
   }
-  const payload = createReadStream(path, { start: CATL_HEADER_SIZE });
-  const stream = payload.pipe(createInflate());
-  return new StreamCataloguePayload(payload, stream);
+  const inflate = await NodeZlibFileInflate.open(path, CATL_HEADER_SIZE);
+  return new NodeZlibCataloguePayload(inflate);
 }
 
 export async function* iterateCatalogueLedgers(

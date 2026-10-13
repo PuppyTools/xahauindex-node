@@ -1,4 +1,5 @@
 import { open, type FileHandle } from 'node:fs/promises';
+import { createInflate, type Inflate } from 'node:zlib';
 
 import koffi from 'koffi';
 
@@ -115,6 +116,15 @@ export function zlibRandomAccessAvailable(): boolean {
   return loadLibz() !== null;
 }
 
+function zlibMemberHeader(buf: Buffer, offset: number): boolean {
+  const cmf = buf[offset];
+  const flg = buf[offset + 1];
+  if (cmf === undefined || flg === undefined) {
+    return false;
+  }
+  return (cmf & 0x0f) === 8 && ((cmf << 8) | flg) % 31 === 0;
+}
+
 function check(rc: number, what: string): void {
   if (rc !== Z_OK && rc !== Z_STREAM_END && rc !== Z_BUF_ERROR) {
     throw new Error(`${what} failed (${rc})`);
@@ -130,15 +140,26 @@ export class ZlibCatalogueInflate {
   private inOff = 0;
   private inLen = 0;
   private filePos: number;
+  private readonly fileSize: number;
+  private readonly wrapped: boolean;
   private pendingOut: Buffer = Buffer.alloc(0);
   private ended = false;
   private closed = false;
 
-  private constructor(lib: Libz, handle: FileHandle, strm: Buffer, filePos: number) {
+  private constructor(
+    lib: Libz,
+    handle: FileHandle,
+    strm: Buffer,
+    filePos: number,
+    fileSize: number,
+    wrapped: boolean,
+  ) {
     this.lib = lib;
     this.handle = handle;
     this.strm = strm;
     this.filePos = filePos;
+    this.fileSize = fileSize;
+    this.wrapped = wrapped;
   }
 
   static async open(path: string, payloadStart: number, resume?: ZlibAccessPoint): Promise<ZlibCatalogueInflate> {
@@ -149,9 +170,10 @@ export class ZlibCatalogueInflate {
     const handle = await open(path, 'r');
     const strm = Buffer.alloc(lib.sizeofStream);
     try {
+      const fileSize = (await handle.stat()).size;
       if (resume === undefined) {
         check(lib.inflateInit2_(strm, ZLIB_WINDOW_BITS, lib.version, lib.sizeofStream), 'inflateInit2');
-        return new ZlibCatalogueInflate(lib, handle, strm, payloadStart);
+        return new ZlibCatalogueInflate(lib, handle, strm, payloadStart, fileSize, true);
       }
       const bits = resume.bits;
       const seek = resume.inputOffset - (bits > 0 ? 1 : 0);
@@ -164,10 +186,10 @@ export class ZlibCatalogueInflate {
         }
         check(lib.inflatePrime(strm, bits, byte[0]! >> (8 - bits)), 'inflatePrime');
         check(lib.inflateSetDictionary(strm, resume.window, resume.window.length), 'inflateSetDictionary');
-        return new ZlibCatalogueInflate(lib, handle, strm, seek + 1);
+        return new ZlibCatalogueInflate(lib, handle, strm, seek + 1, fileSize, false);
       }
       check(lib.inflateSetDictionary(strm, resume.window, resume.window.length), 'inflateSetDictionary');
-      return new ZlibCatalogueInflate(lib, handle, strm, seek);
+      return new ZlibCatalogueInflate(lib, handle, strm, seek, fileSize, false);
     } catch (error) {
       lib.inflateEnd(strm);
       await handle.close();
@@ -289,11 +311,28 @@ export class ZlibCatalogueInflate {
       this.pendingOut = this.pendingOut.length === 0 ? chunk : Buffer.concat([this.pendingOut, chunk]);
     }
     if (rc === Z_STREAM_END) {
-      this.ended = true;
+      this.compactInput();
+      if (this.wrapped && this.nextZlibMember()) {
+        this.lib.inflateEnd(this.strm);
+        this.strm.fill(0);
+        check(
+          this.lib.inflateInit2_(this.strm, ZLIB_WINDOW_BITS, this.lib.version, this.lib.sizeofStream),
+          'inflateInit2',
+        );
+      } else {
+        this.ended = true;
+      }
     } else if (rc !== Z_OK && rc !== Z_BUF_ERROR) {
       check(rc, 'inflate');
     }
     return produced;
+  }
+
+  private nextZlibMember(): boolean {
+    if (this.inLen >= 2 && zlibMemberHeader(this.inBuf, 0)) {
+      return true;
+    }
+    return this.inLen === 0 && this.filePos < this.fileSize;
   }
 
   /** Read more compressed bytes after unused `inBuf` leftover, never over it. */
@@ -310,5 +349,149 @@ export class ZlibCatalogueInflate {
     this.inLen += bytesRead;
     this.filePos += bytesRead;
     return bytesRead;
+  }
+}
+
+/**
+ * Node inflate that continues into the next zlib member when the current one
+ * ends. `createInflate()` piped from the file stops at the first trailer, which
+ * is how skip-scan hit EOF at skipUntil while the CATL still had later ledgers.
+ */
+export class NodeZlibFileInflate {
+  private inflate: Inflate;
+  private pendingOut: Buffer = Buffer.alloc(0);
+  private leftoverIn: Buffer = Buffer.alloc(0);
+  private ended = false;
+  private closed = false;
+  private filePos: number;
+  private readonly fileSize: number;
+
+  private constructor(
+    private readonly handle: FileHandle,
+    filePos: number,
+    fileSize: number,
+  ) {
+    this.filePos = filePos;
+    this.fileSize = fileSize;
+    this.inflate = this.newInflate();
+  }
+
+  static async open(path: string, payloadStart: number): Promise<NodeZlibFileInflate> {
+    const handle = await open(path, 'r');
+    const fileSize = (await handle.stat()).size;
+    return new NodeZlibFileInflate(handle, payloadStart, fileSize);
+  }
+
+  async read(size: number): Promise<Buffer> {
+    while (this.pendingOut.length < size && !this.ended) {
+      await this.pullCompressed();
+    }
+    const take = Math.min(size, this.pendingOut.length);
+    if (take === 0) {
+      return Buffer.alloc(0);
+    }
+    const out = Buffer.from(this.pendingOut.subarray(0, take));
+    this.pendingOut = this.pendingOut.subarray(take);
+    return out;
+  }
+
+  close(): void {
+    if (this.closed) {
+      return;
+    }
+    this.closed = true;
+    this.ended = true;
+    this.inflate.removeAllListeners();
+    this.inflate.destroy();
+    void this.handle.close();
+  }
+
+  private newInflate(): Inflate {
+    const inf = createInflate();
+    inf.on('data', (chunk: Buffer) => {
+      const copy = Buffer.from(chunk);
+      this.pendingOut = this.pendingOut.length === 0 ? copy : Buffer.concat([this.pendingOut, copy]);
+    });
+    return inf;
+  }
+
+  private restartInflate(): void {
+    this.inflate.removeAllListeners();
+    this.inflate.destroy();
+    this.inflate = this.newInflate();
+  }
+
+  private async pullCompressed(): Promise<void> {
+    if (this.leftoverIn.length > 0) {
+      const leftover = this.leftoverIn;
+      this.leftoverIn = Buffer.alloc(0);
+      await this.feed(leftover);
+      return;
+    }
+    const buf = Buffer.alloc(CHUNK);
+    const { bytesRead } = await this.handle.read(buf, 0, buf.length, this.filePos);
+    if (bytesRead === 0) {
+      await this.finishMember();
+      this.ended = true;
+      return;
+    }
+    this.filePos += bytesRead;
+    await this.feed(buf.subarray(0, bytesRead));
+  }
+
+  private async feed(chunk: Buffer): Promise<void> {
+    if (chunk.length === 0) {
+      return;
+    }
+    const before = this.inflate.bytesWritten;
+    const memberEnded = await this.writeAndWait(chunk);
+    if (!memberEnded) {
+      return;
+    }
+    const consumed = Math.min(chunk.length, Math.max(0, this.inflate.bytesWritten - before));
+    if (consumed < chunk.length) {
+      this.leftoverIn = Buffer.from(chunk.subarray(consumed));
+    }
+    this.restartInflate();
+    if (this.leftoverIn.length === 0 && this.filePos >= this.fileSize) {
+      this.ended = true;
+    }
+  }
+
+  private writeAndWait(chunk: Buffer): Promise<boolean> {
+    return new Promise((resolve, reject) => {
+      let ended = false;
+      const onEnd = (): void => {
+        ended = true;
+      };
+      const onErr = (err: Error): void => {
+        reject(err);
+      };
+      this.inflate.once('end', onEnd);
+      this.inflate.once('error', onErr);
+      this.inflate.write(chunk, (err) => {
+        this.inflate.off('end', onEnd);
+        this.inflate.off('error', onErr);
+        if (err) {
+          reject(err);
+          return;
+        }
+        resolve(ended);
+      });
+    });
+  }
+
+  private async finishMember(): Promise<void> {
+    await new Promise<void>((resolve, reject) => {
+      if (this.inflate.writableEnded || this.inflate.destroyed) {
+        resolve();
+        return;
+      }
+      this.inflate.once('end', () => {
+        resolve();
+      });
+      this.inflate.once('error', reject);
+      this.inflate.end();
+    });
   }
 }

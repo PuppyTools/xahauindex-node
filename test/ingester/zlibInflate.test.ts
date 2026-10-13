@@ -6,7 +6,7 @@ import { join } from 'node:path';
 import { describe, it } from 'node:test';
 import { deflateSync } from 'node:zlib';
 
-import { ZlibCatalogueInflate, zlibRandomAccessAvailable } from '../../src/ingester/zlibInflate.js';
+import { NodeZlibFileInflate, ZlibCatalogueInflate, zlibRandomAccessAvailable } from '../../src/ingester/zlibInflate.js';
 
 describe('ZlibCatalogueInflate', () => {
   it('seeks to a zran access point and continues the payload', async () => {
@@ -97,5 +97,46 @@ describe('ZlibCatalogueInflate', () => {
     const got = Buffer.concat(chunks);
     assert.equal(got.length, payload.length);
     assert.ok(got.equals(payload));
+  });
+
+  it('continues into the next concatenated zlib member', async () => {
+    const first = randomBytes(80_000);
+    const second = randomBytes(90_000);
+    const compressed = Buffer.concat([deflateSync(first, { level: 6 }), deflateSync(second, { level: 6 })]);
+    const dir = mkdtempSync(join(tmpdir(), 'xahauindex-zconcat-'));
+    const path = join(dir, 'payload.z');
+    writeFileSync(path, compressed);
+    const expected = Buffer.concat([first, second]);
+
+    const node = await NodeZlibFileInflate.open(path, 0);
+    const nodeChunks: Buffer[] = [];
+    for (;;) {
+      const chunk = await node.read(16_384);
+      if (chunk.length === 0) {
+        break;
+      }
+      nodeChunks.push(chunk);
+    }
+    node.close();
+    const nodeGot = Buffer.concat(nodeChunks);
+    assert.equal(nodeGot.length, expected.length);
+    assert.ok(nodeGot.equals(expected));
+
+    if (!zlibRandomAccessAvailable()) {
+      return;
+    }
+    const libz = await ZlibCatalogueInflate.open(path, 0);
+    const libzChunks: Buffer[] = [];
+    for (;;) {
+      const chunk = await libz.read(16_384);
+      if (chunk.length === 0) {
+        break;
+      }
+      libzChunks.push(chunk);
+    }
+    libz.close();
+    const libzGot = Buffer.concat(libzChunks);
+    assert.equal(libzGot.length, expected.length);
+    assert.ok(libzGot.equals(expected));
   });
 });
