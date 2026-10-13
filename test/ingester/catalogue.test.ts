@@ -221,13 +221,22 @@ function writeCatalogue(options: {
   compressionLevel?: number;
   networkId?: number;
   dir?: string;
+  splitZlibAfter?: number;
 }): string {
   const dir = options.dir ?? mkdtempSync(join(tmpdir(), 'xahauindex-cat-'));
   mkdirSync(dir, { recursive: true });
   const path = join(dir, `cat.${options.minLedger}-${options.maxLedger}`);
-  const payload = Buffer.concat(options.ledgers.map((ledger) => ledgerPayload(ledger)));
   const level = options.compressionLevel ?? 0;
-  const body = level > 0 ? deflateSync(payload, { level }) : payload;
+  let body: Buffer;
+  if (level > 0 && options.splitZlibAfter !== undefined) {
+    const split = options.splitZlibAfter;
+    const first = Buffer.concat(options.ledgers.slice(0, split).map((ledger) => ledgerPayload(ledger)));
+    const rest = Buffer.concat(options.ledgers.slice(split).map((ledger) => ledgerPayload(ledger)));
+    body = Buffer.concat([deflateSync(first, { level }), deflateSync(rest, { level })]);
+  } else {
+    const payload = Buffer.concat(options.ledgers.map((ledger) => ledgerPayload(ledger)));
+    body = level > 0 ? deflateSync(payload, { level }) : payload;
+  }
   const file = Buffer.concat([
     catlHeader({
       minLedger: options.minLedger,
@@ -461,6 +470,31 @@ describe('iterateCatalogueLedgers', () => {
     }
     assert.ok(checkpoints > 0);
     assert.deepEqual(seqs, [175, 176, 177, 178, 179, 180]);
+  });
+
+  it('skip-scans past a concatenated zlib member into later ledgers', async () => {
+    const ledgers: CatLedgerSpec[] = [];
+    for (let seq = 40; seq <= 45; seq += 1) {
+      ledgers.push({
+        seq,
+        hash: seq.toString(16).padStart(64, '0'),
+        accountHash: Buffer.alloc(32, seq >= 43 ? 2 : 1),
+        writeState: seq === 40 || seq === 43,
+        txs: [],
+      });
+    }
+    const path = writeCatalogue({
+      minLedger: 40,
+      maxLedger: 45,
+      ledgers,
+      compressionLevel: 6,
+      splitZlibAfter: 3,
+    });
+    const seqs: number[] = [];
+    for await (const item of iterateCatalogueLedgers(path, { skipUntil: 44, decodeFrom: 44 })) {
+      seqs.push(item.ledger.index);
+    }
+    assert.deepEqual(seqs, [44, 45]);
   });
 });
 
