@@ -26,7 +26,7 @@ import {
   splitTxMeta,
   type CatalogueCheckpoint,
 } from '../../src/ingester/catalogue.js';
-import { HISTORY_CATALOGUE_PATH, runCatalogueImport } from '../../src/ingester/catalogueImport.js';
+import { HISTORY_CATALOGUE_CKPT, HISTORY_CATALOGUE_PATH, runCatalogueImport } from '../../src/ingester/catalogueImport.js';
 import { zlibRandomAccessAvailable } from '../../src/ingester/zlibInflate.js';
 import { HISTORY_DB_FROM, HISTORY_DB_NEXT, HISTORY_DB_STATUS, HISTORY_DB_THROUGH } from '../../src/ingester/historyDb.js';
 import { silentLog, testConfig } from '../helpers.js';
@@ -430,6 +430,38 @@ describe('iterateCatalogueLedgers', () => {
     }
     assert.deepEqual(seqs, [42]);
   });
+
+  it('skip-scans a zlib catalogue with checkpoints without losing later ledgers', async () => {
+    if (!zlibRandomAccessAvailable()) {
+      return;
+    }
+    const ledgers: CatLedgerSpec[] = [];
+    for (let seq = 100; seq <= 180; seq += 1) {
+      ledgers.push({
+        seq,
+        hash: seq.toString(16).padStart(64, '0'),
+        accountHash: Buffer.alloc(32, seq % 250),
+        writeState: true,
+        txs: [],
+      });
+    }
+    const path = writeCatalogue({ minLedger: 100, maxLedger: 180, ledgers, compressionLevel: 6 });
+    const seqs: number[] = [];
+    let checkpoints = 0;
+    for await (const item of iterateCatalogueLedgers(path, {
+      skipUntil: 175,
+      decodeFrom: 175,
+      skipCheckpointEvery: 5,
+      onSkipProgress: async (info) => {
+        checkpoints += 1;
+        await info.checkpoint();
+      },
+    })) {
+      seqs.push(item.ledger.index);
+    }
+    assert.ok(checkpoints > 0);
+    assert.deepEqual(seqs, [175, 176, 177, 178, 179, 180]);
+  });
 });
 
 describe('listCatalogueFiles', () => {
@@ -715,6 +747,68 @@ describe('runCatalogueImport', () => {
     assert.equal(getIndexerState(db, HISTORY_DB_THROUGH), '42');
     assert.equal(getIndexerState(db, HISTORY_CATALOGUE_PATH), dir);
     assert.equal(listDexTrades(db, PAIR, { limit: 10 }).length, 2);
+  });
+
+  it('restarts a zlib file from the beginning when a checkpoint misses the payload', async () => {
+    if (!zlibRandomAccessAvailable()) {
+      return;
+    }
+    const account = Buffer.alloc(32, 1);
+    const path = writeCatalogue({
+      minLedger: 40,
+      maxLedger: 42,
+      compressionLevel: 6,
+      ledgers: [
+        {
+          seq: 40,
+          hash: '11'.repeat(32),
+          accountHash: account,
+          writeState: true,
+          txs: [],
+        },
+        {
+          seq: 41,
+          hash: '22'.repeat(32),
+          accountHash: account,
+          writeState: false,
+          txs: [],
+        },
+        {
+          seq: 42,
+          hash: '33'.repeat(32),
+          accountHash: account,
+          writeState: false,
+          txs: [],
+        },
+      ],
+    });
+    const db = memoryDb();
+    seedSnapshot(db, 50);
+    setIndexerState(db, HISTORY_DB_STATUS, 'running');
+    setIndexerState(db, HISTORY_DB_FROM, '40');
+    setIndexerState(db, HISTORY_DB_THROUGH, '42');
+    setIndexerState(db, HISTORY_DB_NEXT, '42');
+    setIndexerState(
+      db,
+      HISTORY_CATALOGUE_CKPT,
+      JSON.stringify({
+        path,
+        nextSeq: 41,
+        prevAccountHash: account.toString('hex').toUpperCase(),
+        pending: '',
+        inputOffset: 99_999_999,
+        bits: 0,
+        window: Buffer.alloc(32_768).toString('base64'),
+      }),
+    );
+    const result = await runCatalogueImport({
+      db,
+      config: testConfig({ historyCatalogue: path, backfillFromLedger: 1 }),
+      log: silentLog,
+    });
+    assert.equal(result.skipped, false);
+    assert.equal(getIndexerState(db, HISTORY_DB_NEXT), '43');
+    assert.equal(getIndexerState(db, HISTORY_CATALOGUE_CKPT), '');
   });
 
   it('skips import when the snapshot is not complete', async () => {

@@ -351,26 +351,36 @@ class ByteReader {
         return;
       }
       this.consume(result.offset);
-      await this.pull();
+      if (!(await this.pull())) {
+        throw new CatalogueError('unexpected end of catalogue');
+      }
     }
   }
 
   private async ensure(size: number): Promise<void> {
     while (this.pending.length < size) {
-      await this.pull();
+      if (!(await this.pull())) {
+        const unread = this.pending.length;
+        throw new CatalogueError(
+          unread === 0
+            ? 'unexpected end of catalogue'
+            : `unexpected end of catalogue (${unread} unread byte(s), needed ${size})`,
+        );
+      }
     }
   }
 
-  private async pull(): Promise<void> {
+  private async pull(): Promise<boolean> {
     if (this.ended) {
-      throw new CatalogueError('unexpected end of catalogue');
+      return false;
     }
     const chunk = await this.payload.readChunk();
     if (chunk === null) {
       this.ended = true;
-      throw new CatalogueError('unexpected end of catalogue');
+      return false;
     }
     this.pending = this.pending.length === 0 ? chunk : (Buffer.concat([this.pending, chunk]) as Buffer);
+    return true;
   }
 
   private consume(size: number): void {
@@ -611,6 +621,13 @@ export async function* iterateCatalogueLedgers(
         checkpoint,
       };
     }
+  } catch (error) {
+    if (error instanceof CatalogueError && error.message.startsWith('unexpected end of catalogue')) {
+      throw new CatalogueError(
+        `unexpected end of catalogue at ledger ${expected} (file ${header.minLedger}-${header.maxLedger})`,
+      );
+    }
+    throw error;
   } finally {
     payload.destroy();
   }

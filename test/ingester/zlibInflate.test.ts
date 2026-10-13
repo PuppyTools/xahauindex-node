@@ -40,4 +40,62 @@ describe('ZlibCatalogueInflate', () => {
     assert.equal(got.length, payload.length);
     assert.ok(got.equals(payload));
   });
+
+  it('keeps unused compressed bytes when refilling the input buffer', async () => {
+    if (!zlibRandomAccessAvailable()) {
+      return;
+    }
+    const payload = randomBytes(300_000);
+    const compressed = deflateSync(payload, { level: 6 });
+    const dir = mkdtempSync(join(tmpdir(), 'xahauindex-zleftover-'));
+    const path = join(dir, 'payload.z');
+    writeFileSync(path, compressed);
+
+    const inflate = await ZlibCatalogueInflate.open(path, 0);
+    const chunks: Buffer[] = [];
+    for (;;) {
+      const chunk = await inflate.read(17);
+      if (chunk.length === 0) {
+        break;
+      }
+      chunks.push(chunk);
+    }
+    inflate.close();
+    const got = Buffer.concat(chunks);
+    assert.equal(got.length, payload.length);
+    assert.ok(got.equals(payload));
+  });
+
+  it('keeps unused compressed bytes across snapshot refills', async () => {
+    if (!zlibRandomAccessAvailable()) {
+      return;
+    }
+    const payload = randomBytes(400_000);
+    const compressed = deflateSync(payload, { level: 6 });
+    const dir = mkdtempSync(join(tmpdir(), 'xahauindex-zsnap-'));
+    const path = join(dir, 'payload.z');
+    writeFileSync(path, compressed);
+
+    const inflate = await ZlibCatalogueInflate.open(path, 0);
+    const chunks: Buffer[] = [];
+    let reads = 0;
+    for (;;) {
+      const chunk = await inflate.read(1_000);
+      if (chunk.length === 0) {
+        break;
+      }
+      chunks.push(chunk);
+      reads += 1;
+      if (reads % 8 === 0) {
+        const { extra } = await inflate.snapshot();
+        if (extra.length > 0) {
+          chunks.push(extra);
+        }
+      }
+    }
+    inflate.close();
+    const got = Buffer.concat(chunks);
+    assert.equal(got.length, payload.length);
+    assert.ok(got.equals(payload));
+  });
 });
