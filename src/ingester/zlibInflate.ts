@@ -125,7 +125,7 @@ export class ZlibCatalogueInflate {
   private readonly lib: Libz;
   private readonly handle: FileHandle;
   private readonly strm: Buffer;
-  private readonly inBuf: Buffer = Buffer.alloc(CHUNK);
+  private inBuf: Buffer = Buffer.alloc(CHUNK);
   private readonly outScratch: Buffer = Buffer.alloc(CHUNK);
   private inOff = 0;
   private inLen = 0;
@@ -190,9 +190,12 @@ export class ZlibCatalogueInflate {
       }
     }
     const take = Math.min(size, this.pendingOut.length);
-    const out = this.pendingOut.subarray(0, take);
+    if (take === 0) {
+      return Buffer.alloc(0);
+    }
+    const out = Buffer.from(this.pendingOut.subarray(0, take));
     this.pendingOut = this.pendingOut.subarray(take);
-    return take === size ? out : Buffer.from(out);
+    return out;
   }
 
   /**
@@ -243,11 +246,25 @@ export class ZlibCatalogueInflate {
     };
   }
 
+  private compactInput(): void {
+    if (this.inOff <= 0) {
+      return;
+    }
+    if (this.inOff < this.inLen) {
+      this.inBuf.copyWithin(0, this.inOff, this.inLen);
+      this.inLen -= this.inOff;
+    } else {
+      this.inLen = 0;
+    }
+    this.inOff = 0;
+  }
+
   private async inflateOnce(flush: number): Promise<number> {
     if (this.ended) {
       return 0;
     }
-    if (this.inOff >= this.inLen) {
+    this.compactInput();
+    if (this.inLen === 0) {
       const more = await this.readFile();
       if (more === 0 && flush !== Z_BLOCK) {
         this.ended = true;
@@ -255,7 +272,7 @@ export class ZlibCatalogueInflate {
       }
     }
     const view = this.lib.decode(this.strm);
-    const input = this.inBuf.subarray(this.inOff, this.inLen);
+    const input = this.inBuf.subarray(0, this.inLen);
     const output = this.outScratch;
     view.next_in = input;
     view.avail_in = input.length;
@@ -279,10 +296,18 @@ export class ZlibCatalogueInflate {
     return produced;
   }
 
+  /** Read more compressed bytes after unused `inBuf` leftover, never over it. */
   private async readFile(): Promise<number> {
-    const { bytesRead } = await this.handle.read(this.inBuf, 0, this.inBuf.length, this.filePos);
-    this.inOff = 0;
-    this.inLen = bytesRead;
+    this.compactInput();
+    let space = this.inBuf.length - this.inLen;
+    if (space === 0) {
+      const grown = Buffer.alloc(this.inBuf.length * 2);
+      this.inBuf.copy(grown, 0, 0, this.inLen);
+      this.inBuf = grown;
+      space = this.inBuf.length - this.inLen;
+    }
+    const { bytesRead } = await this.handle.read(this.inBuf, this.inLen, space, this.filePos);
+    this.inLen += bytesRead;
     this.filePos += bytesRead;
     return bytesRead;
   }

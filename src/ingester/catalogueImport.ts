@@ -5,6 +5,7 @@ import { resolveBackfillFrom, type Config } from '../config.js';
 import type { SqliteDatabase } from '../db/client.js';
 import { getIndexerState, hasLedger, setIndexerState } from '../db/queries/indexer.js';
 import {
+  CatalogueError,
   XAHAU_MAINNET_ID,
   decodeCatalogueTransactions,
   iterateCatalogueLedgers,
@@ -198,65 +199,86 @@ async function importCatalogueFile(options: {
   let cursor = next;
   let seen = 0;
   let scanned = 0;
-  const iterateOpts = {
-    decodeFrom: cursor,
-    skipUntil: Math.max(target.from, cursor),
-    skipCheckpointEvery: CATALOGUE_SKIP_CHECKPOINT_EVERY,
-    onSkipProgress: async (info: { seq: number; scanned: number; checkpoint: () => Promise<CatalogueCheckpoint> }) => {
-      saveCheckpoint(db, await info.checkpoint());
-      log.info(
-        { path: file.path, seq: info.seq, next: cursor, scanned: info.scanned },
-        'catalogue import scanning to resume point',
-      );
-    },
-    ...(resume === undefined ? {} : { resume }),
-    ...(options.signal === undefined ? {} : { signal: options.signal }),
+  const runIterate = async (useResume: CatalogueCheckpoint | undefined): Promise<void> => {
+    const iterateOpts = {
+      decodeFrom: cursor,
+      skipUntil: Math.max(target.from, cursor),
+      skipCheckpointEvery: CATALOGUE_SKIP_CHECKPOINT_EVERY,
+      onSkipProgress: async (info: { seq: number; scanned: number; checkpoint: () => Promise<CatalogueCheckpoint> }) => {
+        saveCheckpoint(db, await info.checkpoint());
+        log.info(
+          { path: file.path, seq: info.seq, next: cursor, scanned: info.scanned },
+          'catalogue import scanning to resume point',
+        );
+      },
+      ...(useResume === undefined ? {} : { resume: useResume }),
+      ...(options.signal === undefined ? {} : { signal: options.signal }),
+    };
+    for await (const item of iterateCatalogueLedgers(file.path, iterateOpts)) {
+      if (options.signal?.aborted) {
+        throw options.signal.reason ?? new Error('aborted');
+      }
+      const seq = item.ledger.index;
+      scanned += 1;
+      if (scanned % 100 === 0) {
+        await new Promise<void>((resolve) => {
+          setImmediate(resolve);
+        });
+      }
+      if (seq > target.through) {
+        break;
+      }
+      seen += 1;
+      if (hasLedger(db, seq)) {
+        cursor = seq + 1;
+        setIndexerState(db, HISTORY_DB_LEDGER, String(seq));
+        setIndexerState(db, HISTORY_DB_NEXT, String(cursor));
+      } else {
+        const transactions = decodeCatalogueTransactions(item.ledger.blobs);
+        decoded += transactions.length;
+        const result = applyHistoricalLedger(
+          db,
+          {
+            index: seq,
+            hash: item.ledger.hash,
+            closeTime: item.ledger.closeTime,
+            transactions,
+          },
+          log,
+        );
+        applied += result.applied ? 1 : 0;
+        cursor = seq + 1;
+        setIndexerState(db, HISTORY_DB_LEDGER, String(seq));
+        setIndexerState(db, HISTORY_DB_NEXT, String(cursor));
+      }
+      if (seq % CATALOGUE_CHECKPOINT_EVERY === 0) {
+        saveCheckpoint(db, await item.checkpoint());
+      }
+      if (seen === 1 || seq % 100 === 0) {
+        log.info(
+          { from: overallFrom, through: overallThrough, next: cursor, applied, decoded },
+          'catalogue import progress',
+        );
+      }
+    }
   };
-  for await (const item of iterateCatalogueLedgers(file.path, iterateOpts)) {
-    if (options.signal?.aborted) {
-      throw options.signal.reason ?? new Error('aborted');
-    }
-    const seq = item.ledger.index;
-    scanned += 1;
-    if (scanned % 100 === 0) {
-      await new Promise<void>((resolve) => {
-        setImmediate(resolve);
-      });
-    }
-    if (seq > target.through) {
-      break;
-    }
-    seen += 1;
-    if (hasLedger(db, seq)) {
-      cursor = seq + 1;
-      setIndexerState(db, HISTORY_DB_LEDGER, String(seq));
-      setIndexerState(db, HISTORY_DB_NEXT, String(cursor));
+
+  try {
+    await runIterate(resume);
+  } catch (error) {
+    if (
+      resume !== undefined &&
+      error instanceof CatalogueError &&
+      error.message.startsWith('unexpected end of catalogue')
+    ) {
+      log.warn(
+        { path: file.path, resumeSeq: resume.nextSeq, err: error.message },
+        'catalogue checkpoint missed the payload; restarting this file from the beginning',
+      );
+      setIndexerState(db, HISTORY_CATALOGUE_CKPT, '');
+      await runIterate(undefined);
     } else {
-      const transactions = decodeCatalogueTransactions(item.ledger.blobs);
-      decoded += transactions.length;
-      const result = applyHistoricalLedger(
-        db,
-        {
-          index: seq,
-          hash: item.ledger.hash,
-          closeTime: item.ledger.closeTime,
-          transactions,
-        },
-        log,
-      );
-      applied += result.applied ? 1 : 0;
-      cursor = seq + 1;
-      setIndexerState(db, HISTORY_DB_LEDGER, String(seq));
-      setIndexerState(db, HISTORY_DB_NEXT, String(cursor));
-    }
-    if (seq % CATALOGUE_CHECKPOINT_EVERY === 0) {
-      saveCheckpoint(db, await item.checkpoint());
-    }
-    if (seen === 1 || seq % 100 === 0) {
-      log.info(
-        { from: overallFrom, through: overallThrough, next: cursor, applied, decoded },
-        'catalogue import progress',
-      );
+      throw error;
     }
   }
   return { applied, decoded, skipped: false, from: overallFrom, through: overallThrough };
