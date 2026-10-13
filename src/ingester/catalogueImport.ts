@@ -179,6 +179,7 @@ async function importCatalogueFile(options: {
   }
   const loaded = loadCheckpoint(db, file.path, next);
   const resume = checkpointUsable(file, loaded) ? loaded : undefined;
+  const skipUntil = Math.max(target.from, next);
   log.info(
     {
       path: file.path,
@@ -189,6 +190,10 @@ async function importCatalogueFile(options: {
       dumpThrough: file.header.maxLedger,
       networkId: file.header.networkId,
       compressionLevel: file.header.compressionLevel,
+      inflate:
+        file.header.compressionLevel > 0 && resume === undefined && skipUntil > file.header.minLedger
+          ? 'node'
+          : 'libz',
       ...(resume === undefined ? {} : { resumeSeq: resume.nextSeq, resumeOffset: resume.inputOffset }),
     },
     resume === undefined ? 'catalogue import starting' : 'catalogue import resuming from checkpoint',
@@ -205,7 +210,10 @@ async function importCatalogueFile(options: {
       skipUntil: Math.max(target.from, cursor),
       skipCheckpointEvery: CATALOGUE_SKIP_CHECKPOINT_EVERY,
       onSkipProgress: async (info: { seq: number; scanned: number; checkpoint: () => Promise<CatalogueCheckpoint> }) => {
-        saveCheckpoint(db, await info.checkpoint());
+        const ckpt = await info.checkpoint();
+        if (file.header.compressionLevel === 0 || ckpt.window !== null) {
+          saveCheckpoint(db, ckpt);
+        }
         log.info(
           { path: file.path, seq: info.seq, next: cursor, scanned: info.scanned },
           'catalogue import scanning to resume point',
