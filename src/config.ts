@@ -62,7 +62,7 @@ export interface Config {
   historyFromDb: boolean;
   historyLedgerDb: string | null;
   historyTxDb: string | null;
-  /** One xahaud CATL catalogue file to import after snapshot, or null. */
+  /** One xahaud CATL catalogue file, a directory of CATL files, or null. */
   historyCatalogue: string | null;
   /** Ledgers per read batch from the history files. */
   historyBatchSize: number;
@@ -341,6 +341,18 @@ function readOptionalExistingFilePath(env: NodeJS.ProcessEnv, key: string): stri
   return path;
 }
 
+function readOptionalExistingPath(env: NodeJS.ProcessEnv, key: string): string | null {
+  const raw = env[key];
+  if (raw === undefined || raw.trim() === '') {
+    return null;
+  }
+  const path = resolvePath(raw.trim());
+  if (!existsSync(path)) {
+    throw new ConfigError(`${key} path not found: ${path}`);
+  }
+  return path;
+}
+
 function readExistingFilePath(env: NodeJS.ProcessEnv, key: string): string {
   const path = readOptionalExistingFilePath(env, key);
   if (path === null) {
@@ -360,7 +372,7 @@ function readHistoryImport(env: NodeJS.ProcessEnv): {
   const historyFromDb = readBoolean(env, 'BACKFILL_FROM_DB', false);
   const historyBatchSize = readOptionalPositiveInt(env, 'HISTORY_BATCH_SIZE') ?? DEFAULT_HISTORY_BATCH_SIZE;
   const historyWorkers = readOptionalPositiveInt(env, 'HISTORY_WORKERS') ?? DEFAULT_HISTORY_WORKERS;
-  const historyCatalogue = readOptionalExistingFilePath(env, 'HISTORY_CATALOGUE');
+  const historyCatalogue = readOptionalExistingPath(env, 'HISTORY_CATALOGUE');
   if (!historyFromDb) {
     return {
       historyFromDb,

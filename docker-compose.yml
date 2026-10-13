@@ -10,6 +10,7 @@ services:
       DB_PATH: /data/xahauindex.db
       API_HOST: 0.0.0.0
       # Host paths from .env are bind-mounted below; the process sees these container paths.
+      # HISTORY_CATALOGUE may be one CATL file or a directory of CATL files.
       HISTORY_CATALOGUE: ${HISTORY_CATALOGUE:+/import/catalogue}
       HISTORY_LEDGER_DB: ${HISTORY_LEDGER_DB:+/import/ledger.db}
       HISTORY_TX_DB: ${HISTORY_TX_DB:+/import/transaction.db}

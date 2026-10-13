@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdtempSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, it } from 'node:test';
@@ -21,10 +21,13 @@ import {
   decodeVl,
   encodeVl,
   iterateCatalogueLedgers,
+  listCatalogueFiles,
   parseCatlHeader,
   splitTxMeta,
+  type CatalogueCheckpoint,
 } from '../../src/ingester/catalogue.js';
 import { HISTORY_CATALOGUE_PATH, runCatalogueImport } from '../../src/ingester/catalogueImport.js';
+import { zlibRandomAccessAvailable } from '../../src/ingester/zlibInflate.js';
 import { HISTORY_DB_FROM, HISTORY_DB_NEXT, HISTORY_DB_STATUS, HISTORY_DB_THROUGH } from '../../src/ingester/historyDb.js';
 import { silentLog, testConfig } from '../helpers.js';
 
@@ -217,8 +220,10 @@ function writeCatalogue(options: {
   ledgers: CatLedgerSpec[];
   compressionLevel?: number;
   networkId?: number;
+  dir?: string;
 }): string {
-  const dir = mkdtempSync(join(tmpdir(), 'xahauindex-cat-'));
+  const dir = options.dir ?? mkdtempSync(join(tmpdir(), 'xahauindex-cat-'));
+  mkdirSync(dir, { recursive: true });
   const path = join(dir, `cat.${options.minLedger}-${options.maxLedger}`);
   const payload = Buffer.concat(options.ledgers.map((ledger) => ledgerPayload(ledger)));
   const level = options.compressionLevel ?? 0;
@@ -339,6 +344,98 @@ describe('iterateCatalogueLedgers', () => {
     const decoded = decodeCatalogueTransactions(raw[0]?.ledger.blobs ?? []);
     assert.equal(decoded.length, 1);
     assert.equal((decoded[0] as { TransactionType: string }).TransactionType, 'OfferCreate');
+  });
+
+  it('resumes uncompressed and zlib streams from a checkpoint', async () => {
+    const accountA = Buffer.alloc(32, 1);
+    const accountB = Buffer.alloc(32, 2);
+    const ledgers: CatLedgerSpec[] = [
+      {
+        seq: 40,
+        hash: '11'.repeat(32),
+        accountHash: accountA,
+        writeState: true,
+        txs: [],
+      },
+      {
+        seq: 41,
+        hash: '22'.repeat(32),
+        accountHash: accountA,
+        writeState: false,
+        txs: [],
+      },
+      {
+        seq: 42,
+        hash: '33'.repeat(32),
+        accountHash: accountB,
+        writeState: true,
+        txs: [],
+      },
+    ];
+    async function resumeFrom(path: string): Promise<void> {
+      let checkpoint: CatalogueCheckpoint | undefined;
+      for await (const item of iterateCatalogueLedgers(path)) {
+        if (item.ledger.index === 41) {
+          checkpoint = await item.checkpoint();
+          break;
+        }
+      }
+      assert.ok(checkpoint);
+      assert.equal(checkpoint.nextSeq, 42);
+      assert.ok(checkpoint.inputOffset > CATL_HEADER_SIZE);
+      const seqs: number[] = [];
+      for await (const item of iterateCatalogueLedgers(path, { resume: checkpoint })) {
+        seqs.push(item.ledger.index);
+      }
+      assert.deepEqual(seqs, [42]);
+    }
+    await resumeFrom(writeCatalogue({ minLedger: 40, maxLedger: 42, ledgers }));
+    if (zlibRandomAccessAvailable()) {
+      await resumeFrom(writeCatalogue({ minLedger: 40, maxLedger: 42, ledgers, compressionLevel: 6 }));
+    }
+  });
+});
+
+describe('listCatalogueFiles', () => {
+  it('lists CATL files in a directory and ignores other files', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'xahauindex-catdir-'));
+    const first = writeCatalogue({
+      minLedger: 1,
+      maxLedger: 1,
+      dir,
+      ledgers: [
+        {
+          seq: 1,
+          hash: '11'.repeat(32),
+          accountHash: Buffer.alloc(32, 1),
+          writeState: true,
+          txs: [],
+        },
+      ],
+    });
+    const second = writeCatalogue({
+      minLedger: 40,
+      maxLedger: 40,
+      dir,
+      ledgers: [
+        {
+          seq: 40,
+          hash: '22'.repeat(32),
+          accountHash: Buffer.alloc(32, 2),
+          writeState: true,
+          txs: [],
+        },
+      ],
+    });
+    writeFileSync(join(dir, 'notes.txt'), 'not a catalogue');
+    const files = await listCatalogueFiles(dir);
+    assert.deepEqual(
+      files.map((file) => file.path),
+      [first, second],
+    );
+    const single = await listCatalogueFiles(first);
+    assert.equal(single.length, 1);
+    assert.equal(single[0]?.path, first);
   });
 });
 
@@ -527,6 +624,63 @@ describe('runCatalogueImport', () => {
     assert.equal(listDexTrades(db, PAIR, { limit: 10 }).length, 2);
   });
 
+  it('imports every CATL in a directory in ledger order', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'xahauindex-catdir-'));
+    const account = Buffer.alloc(32, 1);
+    const first = offerPayload('aa'.repeat(32));
+    const second = offerPayload('dd'.repeat(32));
+    writeCatalogue({
+      minLedger: 40,
+      maxLedger: 41,
+      dir,
+      ledgers: [
+        {
+          seq: 40,
+          hash: '11'.repeat(32),
+          accountHash: account,
+          writeState: true,
+          txs: [{ hash: 'aa'.repeat(32), tx: first.tx, meta: first.meta }],
+        },
+        {
+          seq: 41,
+          hash: '22'.repeat(32),
+          accountHash: account,
+          writeState: false,
+          txs: [],
+        },
+      ],
+    });
+    writeCatalogue({
+      minLedger: 42,
+      maxLedger: 42,
+      dir,
+      ledgers: [
+        {
+          seq: 42,
+          hash: '33'.repeat(32),
+          accountHash: account,
+          writeState: true,
+          txs: [{ hash: 'dd'.repeat(32), tx: second.tx, meta: second.meta }],
+        },
+      ],
+    });
+    writeFileSync(join(dir, 'readme.txt'), 'ignore me');
+    const db = memoryDb();
+    seedSnapshot(db, 50);
+    const result = await runCatalogueImport({
+      db,
+      config: testConfig({ historyCatalogue: dir, backfillFromLedger: 1 }),
+      log: silentLog,
+    });
+    assert.equal(result.skipped, false);
+    assert.equal(result.from, 40);
+    assert.equal(result.through, 42);
+    assert.equal(getIndexerState(db, HISTORY_DB_FROM), '40');
+    assert.equal(getIndexerState(db, HISTORY_DB_THROUGH), '42');
+    assert.equal(getIndexerState(db, HISTORY_CATALOGUE_PATH), dir);
+    assert.equal(listDexTrades(db, PAIR, { limit: 10 }).length, 2);
+  });
+
   it('skips import when the snapshot is not complete', async () => {
     const path = writeCatalogue({
       minLedger: 1,
@@ -572,6 +726,8 @@ describe('loadConfig HISTORY_CATALOGUE', () => {
     const loaded = loadConfig({ HISTORY_CATALOGUE: path });
     assert.equal(loaded.historyFromDb, false);
     assert.equal(loaded.historyCatalogue, path);
+    const dir = mkdtempSync(join(tmpdir(), 'xahauindex-catdir-'));
+    assert.equal(loadConfig({ HISTORY_CATALOGUE: dir }).historyCatalogue, dir);
     assert.throws(() => loadConfig({ HISTORY_CATALOGUE: join(tmpdir(), 'missing.cat') }), ConfigError);
   });
 });
