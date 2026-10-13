@@ -394,6 +394,42 @@ describe('iterateCatalogueLedgers', () => {
       await resumeFrom(writeCatalogue({ minLedger: 40, maxLedger: 42, ledgers, compressionLevel: 6 }));
     }
   });
+
+  it('skipUntil does not yield ledgers before the resume cursor', async () => {
+    const account = Buffer.alloc(32, 1);
+    const path = writeCatalogue({
+      minLedger: 40,
+      maxLedger: 42,
+      ledgers: [
+        {
+          seq: 40,
+          hash: '11'.repeat(32),
+          accountHash: account,
+          writeState: true,
+          txs: [],
+        },
+        {
+          seq: 41,
+          hash: '22'.repeat(32),
+          accountHash: account,
+          writeState: false,
+          txs: [],
+        },
+        {
+          seq: 42,
+          hash: '33'.repeat(32),
+          accountHash: account,
+          writeState: false,
+          txs: [],
+        },
+      ],
+    });
+    const seqs: number[] = [];
+    for await (const item of iterateCatalogueLedgers(path, { skipUntil: 42, decodeFrom: 42 })) {
+      seqs.push(item.ledger.index);
+    }
+    assert.deepEqual(seqs, [42]);
+  });
 });
 
 describe('listCatalogueFiles', () => {

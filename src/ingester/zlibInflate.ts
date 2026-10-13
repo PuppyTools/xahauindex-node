@@ -10,7 +10,7 @@ const Z_BLOCK = 5;
 const ZLIB_WINDOW_BITS = 15;
 const RAW_WINDOW_BITS = -15;
 const WINSIZE = 32_768;
-const CHUNK = 16_384;
+const CHUNK = 65_536;
 
 interface Libz {
   sizeofStream: number;

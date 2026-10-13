@@ -29,6 +29,7 @@ import type { LiveLogger } from './live.js';
 export const HISTORY_CATALOGUE_PATH = 'history_catalogue_path';
 export const HISTORY_CATALOGUE_CKPT = 'history_catalogue_ckpt';
 export const CATALOGUE_CHECKPOINT_EVERY = 1000;
+export const CATALOGUE_SKIP_CHECKPOINT_EVERY = 50_000;
 
 function parseStateInt(db: SqliteDatabase, key: string): number | null {
   const raw = getIndexerState(db, key);
@@ -199,6 +200,15 @@ async function importCatalogueFile(options: {
   let scanned = 0;
   const iterateOpts = {
     decodeFrom: cursor,
+    skipUntil: Math.max(target.from, cursor),
+    skipCheckpointEvery: CATALOGUE_SKIP_CHECKPOINT_EVERY,
+    onSkipProgress: async (info: { seq: number; scanned: number; checkpoint: () => Promise<CatalogueCheckpoint> }) => {
+      saveCheckpoint(db, await info.checkpoint());
+      log.info(
+        { path: file.path, seq: info.seq, next: cursor, scanned: info.scanned },
+        'catalogue import scanning to resume point',
+      );
+    },
     ...(resume === undefined ? {} : { resume }),
     ...(options.signal === undefined ? {} : { signal: options.signal }),
   };
@@ -212,16 +222,6 @@ async function importCatalogueFile(options: {
       await new Promise<void>((resolve) => {
         setImmediate(resolve);
       });
-    }
-    if (seq < target.from || seq < cursor) {
-      if (seq % CATALOGUE_CHECKPOINT_EVERY === 0) {
-        saveCheckpoint(db, await item.checkpoint());
-        log.info(
-          { path: file.path, seq, next: cursor, scanned },
-          'catalogue import scanning to resume point',
-        );
-      }
-      continue;
     }
     if (seq > target.through) {
       break;
