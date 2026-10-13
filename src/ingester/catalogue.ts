@@ -13,6 +13,8 @@ export const CATL_MAGIC = 0x4c_54_41_43;
 export const CATL_HEADER_SIZE = 88;
 export const CATALOGUE_VERSION = 1;
 export const XAHAU_MAINNET_ID = 21337;
+const PAYLOAD_CHUNK = 256 * 1024;
+const LEDGER_INFO_SIZE = 164;
 
 const TN_TRANSACTION_NM = 2;
 const TN_TRANSACTION_MD = 3;
@@ -195,7 +197,7 @@ class FileCataloguePayload implements CataloguePayload {
   }
 
   async readChunk(): Promise<Buffer | null> {
-    const buf = Buffer.alloc(16_384);
+    const buf = Buffer.alloc(PAYLOAD_CHUNK);
     const { bytesRead } = await this.handle.read(buf, 0, buf.length, this.pos);
     if (bytesRead === 0) {
       return null;
@@ -217,7 +219,7 @@ class ZlibCataloguePayload implements CataloguePayload {
   constructor(private readonly inflate: ZlibCatalogueInflate) {}
 
   async readChunk(): Promise<Buffer | null> {
-    const chunk = await this.inflate.read(16_384);
+    const chunk = await this.inflate.read(PAYLOAD_CHUNK);
     return chunk.length === 0 ? null : chunk;
   }
 
@@ -264,6 +266,35 @@ class StreamCataloguePayload implements CataloguePayload {
   }
 }
 
+function skipShaMapPartial(buf: Buffer, offset: number): { offset: number; done: boolean } {
+  while (offset < buf.length) {
+    const type = buf[offset] ?? 0;
+    if (type === TN_TERMINAL) {
+      return { offset: offset + 1, done: true };
+    }
+    if (offset + 33 > buf.length) {
+      return { offset, done: false };
+    }
+    let next = offset + 33;
+    if (type !== TN_REMOVE) {
+      if (next + 4 > buf.length) {
+        return { offset, done: false };
+      }
+      const size = buf.readUInt32LE(next);
+      if (size > 1024 * 1024 * 1024) {
+        throw new CatalogueError(`catalogue SHAMap leaf is too large (${size})`);
+      }
+      next += 4;
+      if (next + size > buf.length) {
+        return { offset, done: false };
+      }
+      next += size;
+    }
+    offset = next;
+  }
+  return { offset, done: false };
+}
+
 class ByteReader {
   private pending: Buffer = Buffer.alloc(0);
   private ended = false;
@@ -293,23 +324,9 @@ class ByteReader {
   }
 
   async read(size: number): Promise<Buffer> {
-    while (this.pending.length < size) {
-      if (this.ended) {
-        throw new CatalogueError('unexpected end of catalogue');
-      }
-      const chunk = await this.payload.readChunk();
-      if (chunk === null) {
-        this.ended = true;
-        break;
-      }
-      this.pending =
-        this.pending.length === 0 ? chunk : (Buffer.concat([this.pending, chunk]) as Buffer);
-    }
-    if (this.pending.length < size) {
-      throw new CatalogueError('unexpected end of catalogue');
-    }
+    await this.ensure(size);
     const out = this.pending.subarray(0, size);
-    this.pending = this.pending.subarray(size);
+    this.consume(size);
     return out;
   }
 
@@ -325,24 +342,50 @@ class ByteReader {
     const value = (await this.read(8)).readBigUInt64LE(0);
     return Number(value);
   }
+
+  async skipShaMap(): Promise<void> {
+    for (;;) {
+      const result = skipShaMapPartial(this.pending, 0);
+      if (result.done) {
+        this.consume(result.offset);
+        return;
+      }
+      this.consume(result.offset);
+      await this.pull();
+    }
+  }
+
+  private async ensure(size: number): Promise<void> {
+    while (this.pending.length < size) {
+      await this.pull();
+    }
+  }
+
+  private async pull(): Promise<void> {
+    if (this.ended) {
+      throw new CatalogueError('unexpected end of catalogue');
+    }
+    const chunk = await this.payload.readChunk();
+    if (chunk === null) {
+      this.ended = true;
+      throw new CatalogueError('unexpected end of catalogue');
+    }
+    this.pending = this.pending.length === 0 ? chunk : (Buffer.concat([this.pending, chunk]) as Buffer);
+  }
+
+  private consume(size: number): void {
+    if (size <= 0) {
+      return;
+    }
+    this.pending = this.pending.subarray(size);
+    if (this.pending.byteOffset > PAYLOAD_CHUNK) {
+      this.pending = Buffer.from(this.pending);
+    }
+  }
 }
 
 async function skipShaMap(reader: ByteReader): Promise<void> {
-  for (;;) {
-    const type = await reader.readU8();
-    if (type === TN_TERMINAL) {
-      return;
-    }
-    await reader.read(32);
-    if (type === TN_REMOVE) {
-      continue;
-    }
-    const size = await reader.readU32();
-    if (size > 1024 * 1024 * 1024) {
-      throw new CatalogueError(`catalogue SHAMap leaf is too large (${size})`);
-    }
-    await reader.read(size);
-  }
+  await reader.skipShaMap();
 }
 
 async function readTxMap(reader: ByteReader): Promise<CatalogueTxBlob[]> {
@@ -383,21 +426,12 @@ async function readLedgerHeader(reader: ByteReader): Promise<{
   accountHash: string;
   closeTime: number;
 }> {
-  const seq = await reader.readU32();
-  const hash = await reader.read(32);
-  await reader.read(32);
-  const accountHash = await reader.read(32);
-  await reader.read(32);
-  await reader.read(8);
-  await reader.read(4);
-  await reader.read(4);
-  const closeTime = await reader.readU64();
-  await reader.read(8);
+  const buf = await reader.read(LEDGER_INFO_SIZE);
   return {
-    seq,
-    hash: hash.toString('hex').toUpperCase(),
-    accountHash: accountHash.toString('hex').toUpperCase(),
-    closeTime: unixSecondsFromRipple(closeTime),
+    seq: buf.readUInt32LE(0),
+    hash: buf.subarray(4, 36).toString('hex').toUpperCase(),
+    accountHash: buf.subarray(68, 100).toString('hex').toUpperCase(),
+    closeTime: unixSecondsFromRipple(Number(buf.readBigUInt64LE(148))),
   };
 }
 
@@ -478,7 +512,18 @@ async function openCataloguePayload(
 
 export async function* iterateCatalogueLedgers(
   path: string,
-  options?: { signal?: AbortSignal; resume?: CatalogueCheckpoint; decodeFrom?: number },
+  options?: {
+    signal?: AbortSignal;
+    resume?: CatalogueCheckpoint;
+    decodeFrom?: number;
+    skipUntil?: number;
+    skipCheckpointEvery?: number;
+    onSkipProgress?: (info: {
+      seq: number;
+      scanned: number;
+      checkpoint: () => Promise<CatalogueCheckpoint>;
+    }) => Promise<void>;
+  },
 ): AsyncGenerator<{
   header: CatlHeader;
   ledger: CatalogueLedger;
@@ -500,6 +545,9 @@ export async function* iterateCatalogueLedgers(
   let prevAccountHash = resume?.prevAccountHash ?? null;
   let expected = resume?.nextSeq ?? header.minLedger;
   const decodeFrom = options?.decodeFrom ?? header.minLedger;
+  const skipUntil = options?.skipUntil ?? header.minLedger;
+  const skipCheckpointEvery = options?.skipCheckpointEvery ?? 50_000;
+  let skipped = 0;
   try {
     while (expected <= header.maxLedger) {
       if (options?.signal?.aborted) {
@@ -515,7 +563,7 @@ export async function* iterateCatalogueLedgers(
         await skipShaMap(reader);
       }
       let blobs: CatalogueTxBlob[] = [];
-      if (expected < decodeFrom) {
+      if (expected < decodeFrom || expected < skipUntil) {
         await skipShaMap(reader);
       } else {
         blobs = await readTxMap(reader);
@@ -524,6 +572,33 @@ export async function* iterateCatalogueLedgers(
       expected += 1;
       const nextSeq = expected;
       const accountHash = prevAccountHash;
+      const checkpoint = async (): Promise<CatalogueCheckpoint> => {
+        const snap = await reader.snapshot();
+        if (snap.extra.length > 0) {
+          reader.append(snap.extra);
+        }
+        return {
+          path,
+          nextSeq,
+          prevAccountHash: accountHash,
+          pending: Buffer.from(reader.peekPending()),
+          inputOffset: snap.inputOffset,
+          bits: snap.bits,
+          window: snap.window,
+        };
+      };
+      if (info.seq < skipUntil) {
+        skipped += 1;
+        if (options?.onSkipProgress !== undefined && info.seq % skipCheckpointEvery === 0) {
+          await options.onSkipProgress({ seq: info.seq, scanned: skipped, checkpoint });
+        }
+        if (skipped % 2_000 === 0) {
+          await new Promise<void>((resolve) => {
+            setImmediate(resolve);
+          });
+        }
+        continue;
+      }
       yield {
         header,
         ledger: {
@@ -533,21 +608,7 @@ export async function* iterateCatalogueLedgers(
           closeTime: info.closeTime,
           blobs,
         },
-        checkpoint: async () => {
-          const snap = await reader.snapshot();
-          if (snap.extra.length > 0) {
-            reader.append(snap.extra);
-          }
-          return {
-            path,
-            nextSeq,
-            prevAccountHash: accountHash,
-            pending: Buffer.from(reader.peekPending()),
-            inputOffset: snap.inputOffset,
-            bits: snap.bits,
-            window: snap.window,
-          };
-        },
+        checkpoint,
       };
     }
   } finally {
