@@ -197,6 +197,10 @@ export class ZlibCatalogueInflate {
     }
   }
 
+  progress(): { filePos: number; fileSize: number } {
+    return { filePos: this.filePos - (this.inLen - this.inOff), fileSize: this.fileSize };
+  }
+
   async read(size: number): Promise<Buffer> {
     while (this.pendingOut.length < size && !this.ended) {
       const produced = await this.inflateOnce(Z_NO_FLUSH);
@@ -380,6 +384,10 @@ export class NodeZlibFileInflate {
     const handle = await open(path, 'r');
     const fileSize = (await handle.stat()).size;
     return new NodeZlibFileInflate(handle, payloadStart, fileSize);
+  }
+
+  progress(): { filePos: number; fileSize: number } {
+    return { filePos: this.filePos, fileSize: this.fileSize };
   }
 
   async read(size: number): Promise<Buffer> {

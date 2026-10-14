@@ -16,6 +16,7 @@ import {
   CATL_MAGIC,
   CATALOGUE_VERSION,
   CatalogueError,
+  CatalogueTruncatedError,
   XAHAU_MAINNET_ID,
   decodeCatalogueTransactions,
   decodeVl,
@@ -28,7 +29,13 @@ import {
 } from '../../src/ingester/catalogue.js';
 import { HISTORY_CATALOGUE_CKPT, HISTORY_CATALOGUE_PATH, runCatalogueImport } from '../../src/ingester/catalogueImport.js';
 import { zlibRandomAccessAvailable } from '../../src/ingester/zlibInflate.js';
-import { HISTORY_DB_FROM, HISTORY_DB_NEXT, HISTORY_DB_STATUS, HISTORY_DB_THROUGH } from '../../src/ingester/historyDb.js';
+import {
+  HISTORY_DB_FROM,
+  HISTORY_DB_LEDGER,
+  HISTORY_DB_NEXT,
+  HISTORY_DB_STATUS,
+  HISTORY_DB_THROUGH,
+} from '../../src/ingester/historyDb.js';
 import { silentLog, testConfig } from '../helpers.js';
 
 const ISSUER = 'rHb9CJAWyB4rj91VRWn96DkukG4bwdtyTh';
@@ -496,6 +503,58 @@ describe('iterateCatalogueLedgers', () => {
     }
     assert.deepEqual(seqs, [44, 45]);
   });
+
+  it('treats a short payload as truncated after the last complete ledger', async () => {
+    const ledgers: CatLedgerSpec[] = [40, 41, 42].map((seq) => ({
+      seq,
+      hash: seq.toString(16).padStart(64, '0'),
+      accountHash: Buffer.alloc(32, 1),
+      writeState: seq === 40,
+      txs: [],
+    }));
+    async function assertTruncated(path: string, skipUntil?: number): Promise<void> {
+      const seqs: number[] = [];
+      await assert.rejects(
+        async () => {
+          for await (const item of iterateCatalogueLedgers(
+            path,
+            skipUntil === undefined ? undefined : { skipUntil, decodeFrom: skipUntil },
+          )) {
+            seqs.push(item.ledger.index);
+          }
+        },
+        (error: unknown) =>
+          error instanceof CatalogueTruncatedError &&
+          error.lastSeq === 42 &&
+          error.expected === 43 &&
+          error.fileMin === 40 &&
+          error.fileMax === 45,
+      );
+      if (skipUntil === undefined) {
+        assert.deepEqual(seqs, [40, 41, 42]);
+      } else {
+        assert.deepEqual(seqs, []);
+      }
+    }
+    const raw = writeCatalogue({ minLedger: 40, maxLedger: 45, ledgers });
+    const zlib = writeCatalogue({ minLedger: 40, maxLedger: 45, ledgers, compressionLevel: 6 });
+    await assertTruncated(raw);
+    await assertTruncated(raw, 43);
+    await assertTruncated(zlib);
+    await assertTruncated(zlib, 43);
+  });
+
+  it('keeps an empty catalogue as a hard unexpected-end error', async () => {
+    const path = writeCatalogue({ minLedger: 40, maxLedger: 45, ledgers: [] });
+    await assert.rejects(
+      async () => {
+        for await (const _item of iterateCatalogueLedgers(path)) {
+          // empty payload should fail before any ledger
+        }
+      },
+      (error: unknown) => error instanceof CatalogueError && !(error instanceof CatalogueTruncatedError),
+    );
+  });
 });
 
 describe('listCatalogueFiles', () => {
@@ -781,6 +840,174 @@ describe('runCatalogueImport', () => {
     assert.equal(getIndexerState(db, HISTORY_DB_THROUGH), '42');
     assert.equal(getIndexerState(db, HISTORY_CATALOGUE_PATH), dir);
     assert.equal(listDexTrades(db, PAIR, { limit: 10 }).length, 2);
+  });
+
+  it('stops a truncated catalogue at the last complete ledger and leaves RPC to continue', async () => {
+    const account = Buffer.alloc(32, 1);
+    const fill = offerPayload('aa'.repeat(32));
+    const path = writeCatalogue({
+      minLedger: 40,
+      maxLedger: 45,
+      ledgers: [
+        {
+          seq: 40,
+          hash: '11'.repeat(32),
+          accountHash: account,
+          writeState: true,
+          txs: [{ hash: 'aa'.repeat(32), tx: fill.tx, meta: fill.meta }],
+        },
+        {
+          seq: 41,
+          hash: '22'.repeat(32),
+          accountHash: account,
+          writeState: false,
+          txs: [],
+        },
+        {
+          seq: 42,
+          hash: '33'.repeat(32),
+          accountHash: account,
+          writeState: false,
+          txs: [],
+        },
+      ],
+    });
+    const db = memoryDb();
+    seedSnapshot(db, 50);
+    const result = await runCatalogueImport({
+      db,
+      config: testConfig({ historyCatalogue: path, backfillFromLedger: 1 }),
+      log: silentLog,
+    });
+    assert.equal(result.skipped, false);
+    assert.equal(result.from, 40);
+    assert.equal(result.through, 42);
+    assert.equal(result.decoded, 1);
+    assert.equal(getIndexerState(db, HISTORY_DB_STATUS), 'running');
+    assert.equal(getIndexerState(db, HISTORY_DB_THROUGH), '42');
+    assert.equal(getIndexerState(db, HISTORY_DB_NEXT), '43');
+    assert.equal(listDexTrades(db, PAIR, { limit: 10 }).length, 1);
+  });
+
+  it('does not walk later directory files after a truncated CATL', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'xahauindex-catdir-'));
+    const account = Buffer.alloc(32, 1);
+    const first = offerPayload('aa'.repeat(32));
+    const later = offerPayload('dd'.repeat(32));
+    writeCatalogue({
+      minLedger: 40,
+      maxLedger: 45,
+      dir,
+      ledgers: [
+        {
+          seq: 40,
+          hash: '11'.repeat(32),
+          accountHash: account,
+          writeState: true,
+          txs: [{ hash: 'aa'.repeat(32), tx: first.tx, meta: first.meta }],
+        },
+        {
+          seq: 41,
+          hash: '22'.repeat(32),
+          accountHash: account,
+          writeState: false,
+          txs: [],
+        },
+        {
+          seq: 42,
+          hash: '33'.repeat(32),
+          accountHash: account,
+          writeState: false,
+          txs: [],
+        },
+      ],
+    });
+    writeCatalogue({
+      minLedger: 46,
+      maxLedger: 46,
+      dir,
+      ledgers: [
+        {
+          seq: 46,
+          hash: '44'.repeat(32),
+          accountHash: account,
+          writeState: true,
+          txs: [{ hash: 'dd'.repeat(32), tx: later.tx, meta: later.meta }],
+        },
+      ],
+    });
+    const db = memoryDb();
+    seedSnapshot(db, 50);
+    const result = await runCatalogueImport({
+      db,
+      config: testConfig({ historyCatalogue: dir, backfillFromLedger: 1 }),
+      log: silentLog,
+    });
+    assert.equal(result.skipped, false);
+    assert.equal(result.through, 42);
+    assert.equal(getIndexerState(db, HISTORY_DB_STATUS), 'running');
+    assert.equal(getIndexerState(db, HISTORY_DB_THROUGH), '42');
+    assert.equal(getIndexerState(db, HISTORY_DB_NEXT), '43');
+    assert.equal(listDexTrades(db, PAIR, { limit: 10 }).length, 1);
+    assert.equal(
+      listDexTrades(db, PAIR, { limit: 10 }).some((trade) => trade.tx_hash === 'DD'.repeat(32)),
+      false,
+    );
+  });
+
+  it('resets a claimed header max when skip-scan hits a truncated payload', async () => {
+    const account = Buffer.alloc(32, 1);
+    const path = writeCatalogue({
+      minLedger: 40,
+      maxLedger: 45,
+      ledgers: [
+        {
+          seq: 40,
+          hash: '11'.repeat(32),
+          accountHash: account,
+          writeState: true,
+          txs: [],
+        },
+        {
+          seq: 41,
+          hash: '22'.repeat(32),
+          accountHash: account,
+          writeState: false,
+          txs: [],
+        },
+        {
+          seq: 42,
+          hash: '33'.repeat(32),
+          accountHash: account,
+          writeState: false,
+          txs: [],
+        },
+      ],
+    });
+    const db = memoryDb();
+    seedSnapshot(db, 50);
+    upsertLedger(db, {
+      ledger_index: 42,
+      close_time: 1_700_000_042,
+      hash: '33'.repeat(32),
+      tx_count: 0,
+      indexed_at: 1_700_000_000,
+    });
+    setIndexerState(db, HISTORY_DB_STATUS, 'running');
+    setIndexerState(db, HISTORY_DB_FROM, '40');
+    setIndexerState(db, HISTORY_DB_THROUGH, '45');
+    setIndexerState(db, HISTORY_DB_LEDGER, '42');
+    setIndexerState(db, HISTORY_DB_NEXT, '43');
+    const result = await runCatalogueImport({
+      db,
+      config: testConfig({ historyCatalogue: path, backfillFromLedger: 1 }),
+      log: silentLog,
+    });
+    assert.equal(result.skipped, false);
+    assert.equal(result.through, 42);
+    assert.equal(getIndexerState(db, HISTORY_DB_STATUS), 'running');
+    assert.equal(getIndexerState(db, HISTORY_DB_THROUGH), '42');
+    assert.equal(getIndexerState(db, HISTORY_DB_NEXT), '43');
   });
 
   it('restarts a zlib file from the beginning when a checkpoint misses the payload', async () => {
