@@ -6,6 +6,7 @@ import type { SqliteDatabase } from '../db/client.js';
 import { getIndexerState, hasLedger, setIndexerState } from '../db/queries/indexer.js';
 import {
   CatalogueError,
+  CatalogueTruncatedError,
   XAHAU_MAINNET_ID,
   decodeCatalogueTransactions,
   iterateCatalogueLedgers,
@@ -127,7 +128,14 @@ async function importCatalogueFile(options: {
   file: CatalogueFile;
   snapshot: number;
   config: Config;
-}): Promise<{ applied: number; decoded: number; skipped: boolean; from: number; through: number }> {
+}): Promise<{
+  applied: number;
+  decoded: number;
+  skipped: boolean;
+  truncated: boolean;
+  from: number;
+  through: number;
+}> {
   const { db, log, file } = options;
   const target = historyImportTargetRange(
     { from: Math.max(1, file.header.minLedger), through: file.header.maxLedger },
@@ -145,6 +153,7 @@ async function importCatalogueFile(options: {
       applied: 0,
       decoded: 0,
       skipped: true,
+      truncated: false,
       from: storedFrom ?? file.header.minLedger,
       through: storedThrough ?? file.header.maxLedger,
     };
@@ -159,6 +168,7 @@ async function importCatalogueFile(options: {
       applied: 0,
       decoded: 0,
       skipped: true,
+      truncated: false,
       from: imported?.from ?? target.from,
       through: imported?.through ?? target.through,
     };
@@ -168,10 +178,11 @@ async function importCatalogueFile(options: {
   const storedThrough = parseStateInt(db, HISTORY_DB_THROUGH);
   const storedNext = parseStateInt(db, HISTORY_DB_NEXT);
   const overallFrom = storedFrom !== null ? Math.min(storedFrom, target.from) : target.from;
-  const overallThrough = storedThrough !== null ? Math.max(storedThrough, target.through) : target.through;
   const next = resumeNext(storedNext, target);
   setIndexerState(db, HISTORY_DB_FROM, String(overallFrom));
-  setIndexerState(db, HISTORY_DB_THROUGH, String(overallThrough));
+  if (storedThrough !== null) {
+    setIndexerState(db, HISTORY_DB_THROUGH, String(storedThrough));
+  }
   setIndexerState(db, HISTORY_DB_NEXT, String(next));
   setIndexerState(db, HISTORY_DB_STATUS, 'running');
   if (file.header.networkId !== 0 && file.header.networkId !== XAHAU_MAINNET_ID) {
@@ -184,7 +195,7 @@ async function importCatalogueFile(options: {
     {
       path: file.path,
       from: target.from,
-      through: overallThrough,
+      through: target.through,
       next,
       dumpFrom: file.header.minLedger,
       dumpThrough: file.header.maxLedger,
@@ -239,8 +250,6 @@ async function importCatalogueFile(options: {
       seen += 1;
       if (hasLedger(db, seq)) {
         cursor = seq + 1;
-        setIndexerState(db, HISTORY_DB_LEDGER, String(seq));
-        setIndexerState(db, HISTORY_DB_NEXT, String(cursor));
       } else {
         const transactions = decodeCatalogueTransactions(item.ledger.blobs);
         decoded += transactions.length;
@@ -256,19 +265,48 @@ async function importCatalogueFile(options: {
         );
         applied += result.applied ? 1 : 0;
         cursor = seq + 1;
-        setIndexerState(db, HISTORY_DB_LEDGER, String(seq));
-        setIndexerState(db, HISTORY_DB_NEXT, String(cursor));
       }
+      const currentThrough = parseStateInt(db, HISTORY_DB_THROUGH);
+      setIndexerState(db, HISTORY_DB_LEDGER, String(seq));
+      setIndexerState(db, HISTORY_DB_NEXT, String(cursor));
+      setIndexerState(db, HISTORY_DB_THROUGH, String(currentThrough !== null ? Math.max(currentThrough, seq) : seq));
       if (seq % CATALOGUE_CHECKPOINT_EVERY === 0) {
         saveCheckpoint(db, await item.checkpoint());
       }
       if (seen === 1 || seq % 100 === 0) {
         log.info(
-          { from: overallFrom, through: overallThrough, next: cursor, applied, decoded },
+          { from: overallFrom, through: target.through, next: cursor, applied, decoded },
           'catalogue import progress',
         );
       }
     }
+  };
+
+  const finishTruncated = (
+    error: CatalogueTruncatedError,
+  ): { applied: number; decoded: number; skipped: boolean; truncated: boolean; from: number; through: number } => {
+    const lastSeq = error.lastSeq;
+    const stored = parseStateInt(db, HISTORY_DB_THROUGH);
+    const importedThrough = lastSeq >= overallFrom ? lastSeq : (stored ?? lastSeq);
+    setIndexerState(db, HISTORY_DB_THROUGH, String(importedThrough));
+    if (lastSeq >= overallFrom) {
+      setIndexerState(db, HISTORY_DB_LEDGER, String(lastSeq));
+      setIndexerState(db, HISTORY_DB_NEXT, String(lastSeq + 1));
+    }
+    setIndexerState(db, HISTORY_CATALOGUE_CKPT, '');
+    log.warn(
+      {
+        path: file.path,
+        lastSeq,
+        expected: error.expected,
+        dumpFrom: file.header.minLedger,
+        dumpThrough: file.header.maxLedger,
+        headerFilesize: file.header.filesize.toString(),
+        ...(error.filePos === null ? {} : { filePos: error.filePos, fileSize: error.fileSize }),
+      },
+      'catalogue file is truncated; imported through last complete ledger',
+    );
+    return { applied, decoded, skipped: false, truncated: true, from: overallFrom, through: importedThrough };
   };
 
   try {
@@ -277,6 +315,7 @@ async function importCatalogueFile(options: {
     if (
       resume !== undefined &&
       error instanceof CatalogueError &&
+      !(error instanceof CatalogueTruncatedError) &&
       error.message.startsWith('unexpected end of catalogue')
     ) {
       log.warn(
@@ -284,12 +323,23 @@ async function importCatalogueFile(options: {
         'catalogue checkpoint missed the payload; restarting this file from the beginning',
       );
       setIndexerState(db, HISTORY_CATALOGUE_CKPT, '');
-      await runIterate(undefined);
+      try {
+        await runIterate(undefined);
+      } catch (retryError) {
+        if (retryError instanceof CatalogueTruncatedError) {
+          return finishTruncated(retryError);
+        }
+        throw retryError;
+      }
+    } else if (error instanceof CatalogueTruncatedError) {
+      return finishTruncated(error);
     } else {
       throw error;
     }
   }
-  return { applied, decoded, skipped: false, from: overallFrom, through: overallThrough };
+  const finishedThrough = storedThrough !== null ? Math.max(storedThrough, target.through) : target.through;
+  setIndexerState(db, HISTORY_DB_THROUGH, String(finishedThrough));
+  return { applied, decoded, skipped: false, truncated: false, from: overallFrom, through: finishedThrough };
 }
 
 export async function runCatalogueImport(options: {
@@ -340,6 +390,7 @@ export async function runCatalogueImport(options: {
   let decoded = 0;
   const failed = 0;
   let importedAny = false;
+  let truncated = false;
   let from: number | null = null;
   let through: number | null = null;
   for (const file of files) {
@@ -358,6 +409,10 @@ export async function runCatalogueImport(options: {
     if (!result.skipped) {
       importedAny = true;
     }
+    if (result.truncated) {
+      truncated = true;
+      break;
+    }
   }
   if (!importedAny) {
     const imported = historyImportedRange(options.db);
@@ -369,6 +424,13 @@ export async function runCatalogueImport(options: {
       decoded: 0,
       failed: 0,
     };
+  }
+  if (truncated) {
+    options.log.warn(
+      { from, through, applied, decoded, path: resolved },
+      'catalogue import stopped at truncated file; RPC backfill will continue from there',
+    );
+    return { skipped: false, from, through, applied, decoded, failed };
   }
   setIndexerState(options.db, HISTORY_DB_STATUS, 'complete');
   setIndexerState(options.db, HISTORY_CATALOGUE_CKPT, '');

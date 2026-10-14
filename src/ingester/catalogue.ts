@@ -37,6 +37,29 @@ export interface CatlHeader {
   filesize: bigint;
 }
 
+export class CatalogueTruncatedError extends CatalogueError {
+  readonly lastSeq: number;
+  readonly expected: number;
+  readonly fileMin: number;
+  readonly fileMax: number;
+  readonly filePos: number | null;
+  readonly fileSize: number | null;
+
+  constructor(expected: number, header: CatlHeader, progress?: { filePos: number; fileSize: number } | null) {
+    const lastSeq = expected - 1;
+    super(
+      `catalogue payload ends at ledger ${lastSeq}; header claims ${header.minLedger}-${header.maxLedger} (expected ${expected})`,
+    );
+    this.name = 'CatalogueTruncatedError';
+    this.lastSeq = lastSeq;
+    this.expected = expected;
+    this.fileMin = header.minLedger;
+    this.fileMax = header.maxLedger;
+    this.filePos = progress?.filePos ?? null;
+    this.fileSize = progress?.fileSize ?? null;
+  }
+}
+
 export interface CatalogueTxBlob {
   hash: string;
   rawTxn: Buffer;
@@ -181,6 +204,7 @@ export function splitTxMeta(data: Buffer): { rawTxn: Buffer; txnMeta: Buffer | n
 interface CataloguePayload {
   readChunk(): Promise<Buffer | null>;
   snapshot(): Promise<{ extra: Buffer; inputOffset: number; bits: number; window: Buffer | null }>;
+  progress(): { filePos: number; fileSize: number } | null;
   destroy(): void;
 }
 
@@ -190,6 +214,7 @@ class FileCataloguePayload implements CataloguePayload {
   constructor(
     private readonly handle: FileHandle,
     start: number,
+    private readonly fileSize: number,
   ) {
     this.pos = start;
   }
@@ -206,6 +231,10 @@ class FileCataloguePayload implements CataloguePayload {
 
   async snapshot(): Promise<{ extra: Buffer; inputOffset: number; bits: number; window: Buffer | null }> {
     return { extra: Buffer.alloc(0), inputOffset: this.pos, bits: 0, window: null };
+  }
+
+  progress(): { filePos: number; fileSize: number } {
+    return { filePos: this.pos, fileSize: this.fileSize };
   }
 
   destroy(): void {
@@ -226,6 +255,10 @@ class ZlibCataloguePayload implements CataloguePayload {
     return { extra, inputOffset: point.inputOffset, bits: point.bits, window: point.window };
   }
 
+  progress(): { filePos: number; fileSize: number } {
+    return this.inflate.progress();
+  }
+
   destroy(): void {
     this.inflate.close();
   }
@@ -241,6 +274,10 @@ class NodeZlibCataloguePayload implements CataloguePayload {
 
   async snapshot(): Promise<{ extra: Buffer; inputOffset: number; bits: number; window: Buffer | null }> {
     return { extra: Buffer.alloc(0), inputOffset: CATL_HEADER_SIZE, bits: 0, window: null };
+  }
+
+  progress(): { filePos: number; fileSize: number } {
+    return this.inflate.progress();
   }
 
   destroy(): void {
@@ -484,7 +521,8 @@ async function openCataloguePayload(
   const start = resume !== null && header.compressionLevel === 0 ? resume.inputOffset : CATL_HEADER_SIZE;
   if (header.compressionLevel === 0) {
     const handle = await open(path, 'r');
-    return new FileCataloguePayload(handle, start);
+    const fileSize = (await handle.stat()).size;
+    return new FileCataloguePayload(handle, start, fileSize);
   }
   if (resume !== null && resume.window !== null && zlibRandomAccessAvailable()) {
     const inflate = await ZlibCatalogueInflate.open(path, CATL_HEADER_SIZE, {
@@ -537,7 +575,8 @@ export async function* iterateCatalogueLedgers(
     reader.prepend(resume.pending);
   }
   let prevAccountHash = resume?.prevAccountHash ?? null;
-  let expected = resume?.nextSeq ?? header.minLedger;
+  const startSeq = resume?.nextSeq ?? header.minLedger;
+  let expected = startSeq;
   const decodeFrom = options?.decodeFrom ?? header.minLedger;
   const skipCheckpointEvery = options?.skipCheckpointEvery ?? 50_000;
   let skipped = 0;
@@ -606,6 +645,9 @@ export async function* iterateCatalogueLedgers(
     }
   } catch (error) {
     if (error instanceof CatalogueError && error.message.startsWith('unexpected end of catalogue')) {
+      if (expected > startSeq) {
+        throw new CatalogueTruncatedError(expected, header, payload.progress());
+      }
       throw new CatalogueError(
         `unexpected end of catalogue at ledger ${expected} (file ${header.minLedger}-${header.maxLedger})`,
       );
