@@ -11,7 +11,7 @@ import {
   type LiveLogger,
 } from './live.js';
 import { walkPrefetch } from './prefetch.js';
-import type { ClosedLedger, LiveLedgerSource } from './source.js';
+import { isConnectionError, type ClosedLedger, type LiveLedgerSource } from './source.js';
 
 export type BackfillRunStatus = 'idle' | 'running' | 'complete';
 
@@ -90,7 +90,7 @@ export function resumeBackfillIndex(options: {
 }
 
 function fetchClosedLedger(
-  source: Pick<LiveLedgerSource, 'getLedgerWithTransactions' | 'quota'>,
+  source: Pick<LiveLedgerSource, 'getLedgerWithTransactions' | 'quota' | 'reconnect'>,
   index: number,
   options: {
     log: LiveLogger;
@@ -108,7 +108,20 @@ function fetchClosedLedger(
       withQuota(
         source.quota,
         'backfill',
-        () => source.getLedgerWithTransactions(index),
+        async () => {
+          try {
+            return await source.getLedgerWithTransactions(index);
+          } catch (error) {
+            if (isConnectionError(error) && source.reconnect !== undefined) {
+              try {
+                await source.reconnect();
+              } catch {
+                // retry loop will wait and try the ledger again
+              }
+            }
+            throw error;
+          }
+        },
         options.signal,
         ({ reason, waitMs }) => {
           options.log.info({ ledger: index, reason, waitMs, ...options.progress }, options.pauseMsg);
@@ -118,6 +131,7 @@ function fetchClosedLedger(
       minMs: options.retryMinMs ?? 1_000,
       maxMs: 30_000,
       attempts: options.fetchAttempts ?? 6,
+      retryForever: isConnectionError,
       ...(options.signal === undefined ? {} : { signal: options.signal }),
       onRetry: ({ waitMs, rateLimited, error }) => {
         if (rateLimited) {
@@ -131,7 +145,15 @@ function fetchClosedLedger(
           );
           return;
         }
-        options.log.warn({ ledger: index, waitMs, err: error }, options.retryMsg);
+        options.log.warn(
+          {
+            ledger: index,
+            waitMs,
+            err: error,
+            ...(isConnectionError(error) ? { reconnecting: true } : {}),
+          },
+          options.retryMsg,
+        );
       },
     },
   );
@@ -139,7 +161,7 @@ function fetchClosedLedger(
 
 export async function fillLiveGap(options: {
   db: SqliteDatabase;
-  source: Pick<LiveLedgerSource, 'getLedgerWithTransactions' | 'quota'>;
+  source: Pick<LiveLedgerSource, 'getLedgerWithTransactions' | 'quota' | 'reconnect'>;
   log: LiveLogger;
   signal?: AbortSignal;
   fetchAttempts?: number;
@@ -188,6 +210,9 @@ export async function fillLiveGap(options: {
         if (options.signal?.aborted) {
           throw options.signal.reason ?? outcome.error;
         }
+        if (isConnectionError(outcome.error)) {
+          throw outcome.error;
+        }
         log.warn({ err: outcome.error, ledger: index }, 'live gap ledger unavailable, skipping');
         skippedLedgers += 1;
         setIndexerState(db, LIVE_GAP_NEXT, String(index + 1));
@@ -226,7 +251,7 @@ export async function fillLiveGap(options: {
 
 export async function runBackfill(options: {
   db: SqliteDatabase;
-  source: Pick<LiveLedgerSource, 'getLedgerWithTransactions' | 'quota'>;
+  source: Pick<LiveLedgerSource, 'getLedgerWithTransactions' | 'quota' | 'reconnect'>;
   config: Config;
   log: LiveLogger;
   signal?: AbortSignal;
@@ -337,6 +362,9 @@ export async function runBackfill(options: {
       if (!outcome.ok) {
         if (options.signal?.aborted) {
           throw options.signal.reason ?? outcome.error;
+        }
+        if (isConnectionError(outcome.error)) {
+          throw outcome.error;
         }
         log.warn({ err: outcome.error, ledger: cursor }, 'historical ledger unavailable, skipping');
         skippedLedgers += 1;

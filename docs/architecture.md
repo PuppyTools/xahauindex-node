@@ -70,7 +70,7 @@ Objects consumed during snapshot:
 
 - Reconnect with exponential backoff (1s → 60s).
 - Subscribe at the current tip first so a short-history live node stays usable.
-- Ledgers between last-indexed and the live node's `complete_ledgers` floor are a forward gap fill on the history node, not a live catch-up on `XAHAUD_URL`.
+- Ledgers between last-indexed and the live node's `complete_ledgers` floor are a forward gap fill on the history node, not a live catch-up on `XAHAUD_URL`. A dropped history websocket reconnects and keeps retrying; `NotConnectedError` does not skip those ledgers (skipping while live subscribe advances the tip leaves a growing hole).
 - After subscribe, catch up only the ledgers the live node still has, then apply newer `ledgerClosed` events.
 - Process only validated `tesSUCCESS` transactions.
 - One SQLite transaction per ledger.
