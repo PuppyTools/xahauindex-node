@@ -1,4 +1,4 @@
-import { isValidAddress } from '@transia/xrpl';
+import { isValidAddress } from 'xahau';
 
 import type { Amount, IssuedAmount } from '../types/xahau.js';
 

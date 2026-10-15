@@ -1,4 +1,4 @@
-import { Client, rippleTimeToUnixTime, type LedgerStream } from '@transia/xrpl';
+import { Client, rippleTimeToUnixTime, type LedgerStream } from 'xahau';
 
 import { BACKFILL_QUOTA_PAUSE_MS, NodeQuota } from '../util/quota.js';
 
@@ -92,6 +92,31 @@ function asLedgerRecord(value: unknown): Record<string, unknown> {
 function isHttpUrl(url: string): boolean {
   const protocol = new URL(url).protocol;
   return protocol === 'http:' || protocol === 'https:';
+}
+
+export function isConnectionError(error: unknown): boolean {
+  const texts: string[] = [];
+  if (error instanceof Error) {
+    texts.push(error.name, error.message);
+    const cause = (error as { cause?: unknown }).cause;
+    if (cause instanceof Error) {
+      texts.push(cause.name, cause.message);
+    }
+  }
+  if (typeof error === 'object' && error !== null) {
+    const record = error as { name?: unknown; message?: unknown };
+    if (typeof record.name === 'string') {
+      texts.push(record.name);
+    }
+    if (typeof record.message === 'string') {
+      texts.push(record.message);
+    }
+  }
+  return texts.some((text) =>
+    /NotConnectedError|ConnectionError|DisconnectedError|not connected|connection failed|websocket is not|socket hang up|ECONNRESET|ECONNREFUSED|EHOSTUNREACH|ENOTFOUND|ETIMEDOUT|fetch failed/i.test(
+      text,
+    ),
+  );
 }
 
 export function isLedgerNotFound(error: unknown): boolean {
@@ -211,6 +236,8 @@ export function createXahauSource(url: string, options: XahauSourceOptions = {})
   const client = new Client(url);
   const quota = createQuota(options);
   const listeners = new Set<(ledger: ValidatedLedger) => void>();
+  let subscribed = false;
+  let reconnecting: Promise<void> | null = null;
 
   const onClosed = (ledger: LedgerStream): void => {
     const closed: ValidatedLedger = {
@@ -223,29 +250,71 @@ export function createXahauSource(url: string, options: XahauSourceOptions = {})
     }
   };
 
-  return {
-    quota,
-    connect: async () => {
-      await client.connect();
-    },
-    disconnect: async () => {
-      client.off('ledgerClosed', onClosed);
-      listeners.clear();
-      await client.disconnect();
-    },
-    reconnect: async () => {
+  const reconnectClient = async (): Promise<void> => {
+    if (reconnecting !== null) {
+      await reconnecting;
+      return;
+    }
+    reconnecting = (async () => {
       try {
         await client.disconnect();
       } catch {
         // already closed
       }
       await client.connect();
+      if (subscribed) {
+        client.off('ledgerClosed', onClosed);
+        client.on('ledgerClosed', onClosed);
+        await client.request({
+          command: 'subscribe',
+          streams: ['ledger'],
+        });
+      }
+    })().finally(() => {
+      reconnecting = null;
+    });
+    await reconnecting;
+  };
+
+  const ensureConnected = async (): Promise<void> => {
+    if (client.isConnected()) {
+      return;
+    }
+    await reconnectClient();
+  };
+
+  const withConnection = async <T>(fn: () => Promise<T>): Promise<T> => {
+    await ensureConnected();
+    try {
+      return await fn();
+    } catch (error) {
+      if (!isConnectionError(error)) {
+        throw error;
+      }
+      await reconnectClient();
+      return await fn();
+    }
+  };
+
+  return {
+    quota,
+    connect: async () => {
+      await client.connect();
     },
+    disconnect: async () => {
+      subscribed = false;
+      client.off('ledgerClosed', onClosed);
+      listeners.clear();
+      await client.disconnect();
+    },
+    reconnect: reconnectClient,
     getValidatedLedger: async () => {
-      const response = await client.request({
-        command: 'ledger',
-        ledger_index: 'validated',
-      });
+      const response = await withConnection(() =>
+        client.request({
+          command: 'ledger',
+          ledger_index: 'validated',
+        }),
+      );
       const ledger = response.result.ledger as {
         ledger_index?: number | string;
         ledger_hash?: string;
@@ -266,8 +335,8 @@ export function createXahauSource(url: string, options: XahauSourceOptions = {})
       if (marker !== undefined) {
         request.marker = marker;
       }
-      const response = (await client.request(
-        request as unknown as Parameters<Client['request']>[0],
+      const response = (await withConnection(() =>
+        client.request(request as unknown as Parameters<Client['request']>[0]),
       )) as { result: { state?: unknown[]; marker?: unknown } };
       const result = response.result;
       const page: LedgerDataPageResult = {
@@ -279,12 +348,14 @@ export function createXahauSource(url: string, options: XahauSourceOptions = {})
       return page;
     },
     getLedgerWithTransactions: async (ledgerIndex) => {
-      const response = (await client.request({
-        command: 'ledger',
-        ledger_index: ledgerIndex,
-        transactions: true,
-        expand: true,
-      } as unknown as Parameters<Client['request']>[0])) as {
+      const response = (await withConnection(() =>
+        client.request({
+          command: 'ledger',
+          ledger_index: ledgerIndex,
+          transactions: true,
+          expand: true,
+        } as unknown as Parameters<Client['request']>[0]),
+      )) as {
         result: {
           ledger_index?: number;
           ledger_hash?: string;
@@ -299,17 +370,19 @@ export function createXahauSource(url: string, options: XahauSourceOptions = {})
       return { index, hash, closeTime, transactions };
     },
     getCompleteLedgers: async () => {
-      const response = await client.request({ command: 'server_info' });
+      const response = await withConnection(() => client.request({ command: 'server_info' }));
       const info = response.result.info as { complete_ledgers?: unknown };
       return typeof info.complete_ledgers === 'string' ? info.complete_ledgers : null;
     },
     subscribeLedgers: async () => {
+      await ensureConnected();
       client.off('ledgerClosed', onClosed);
       client.on('ledgerClosed', onClosed);
       await client.request({
         command: 'subscribe',
         streams: ['ledger'],
       });
+      subscribed = true;
     },
     onLedgerClosed: (handler) => {
       listeners.add(handler);

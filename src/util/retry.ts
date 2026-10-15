@@ -6,6 +6,8 @@ export interface RetryOptions {
   factor?: number;
   attempts?: number;
   signal?: AbortSignal;
+  /** When true, this error does not consume an attempt (same as rate-limits). */
+  retryForever?: (error: unknown) => boolean;
   onRetry?: (info: { error: unknown; waitMs: number; rateLimited: boolean }) => void;
 }
 
@@ -46,6 +48,12 @@ export async function retry<T>(fn: () => Promise<T>, options: RetryOptions = {})
         const waitMs = rateLimitWaitMs(error, delay);
         options.onRetry?.({ error, waitMs, rateLimited: true });
         await sleep(waitMs, options.signal);
+        continue;
+      }
+      if (options.retryForever?.(error)) {
+        options.onRetry?.({ error, waitMs: delay, rateLimited: false });
+        await sleep(delay, options.signal);
+        delay = Math.min(maxMs, delay * factor);
         continue;
       }
       tried += 1;

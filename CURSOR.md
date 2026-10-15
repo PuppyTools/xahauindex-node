@@ -16,7 +16,7 @@ Repo: `github.com/PuppyTools/xahauindex-node`
 | Runtime | Node.js 22+ ESM | better-sqlite3 13 requires Node 22+ |
 | Build | `tsc` → `dist/` | Standard, no bundler complexity needed |
 | Database | SQLite (`better-sqlite3`) | Zero-dependency self-hosting |
-| Ledger client | `@transia/xrpl` | Xahau-specific types (URIToken, SetHook, SetRemarks) |
+| Ledger client | `xahau` (`xahau.js`) | Xahau-specific types (URIToken, SetHook, SetRemarks) |
 | HTTP server | Fastify v5 + TypeBox | Performance, compile-time safe schemas |
 | WS server | `@fastify/websocket` | Integrates with Fastify lifecycle |
 | Migrations | numbered SQL files, append-only | Simple |
@@ -24,7 +24,7 @@ Repo: `github.com/PuppyTools/xahauindex-node`
 | Logging | `pino` | Structured JSON, low overhead |
 | Tests | `node:test` | No extra deps |
 
-`@transia/xrpl` is a transport + helper library. **All Xahau ledger object shapes we persist are typed in `src/types/xahau.ts`.** Do not assume the package is complete for HookOn v2 or Remarks.
+`xahau` is a transport + helper library. **All Xahau ledger object shapes we persist are typed in `src/types/xahau.ts`.** Do not assume the package is complete for HookOn v2 or Remarks.
 
 ## TypeScript rules
 
@@ -111,7 +111,7 @@ v1 indexes remarks on URITokens, issuer AccountRoots, and issuer-side RippleStat
 - Amounts: always **strings**
 
 ### Account addresses
-Always base58 r-address. Validate with `@transia/xrpl` `isValidAddress()`.
+Always base58 r-address. Validate with `xahau` `isValidAddress()`.
 
 ### Blackholed
 `lsfDisableMaster` **and** (no `RegularKey` **or** RegularKey is a known blackhole address).
@@ -146,7 +146,7 @@ Copy `.env.example` to `.env`. Never commit `.env`.
 - `LOG_LEVEL` — `trace|debug|info|warn|error`
 - `BACKFILL_FROM_LEDGER` — optional earliest ledger the walk stops at (`genesis`/`start` = `1`). Alias: `FULL_HISTORY_START`.
 - `BACKFILL_LOOKBACK` — if `FROM` is unset, stop at `snapshot - lookback + 1`. Neither set = no backfill. Walk is snapshot → FROM.
-- `BACKFILL_XAHAUD_URL` — optional dedicated history node (`ws`/`wss` or `http`/`https` JSON-RPC). Unset = reuse `XAHAUD_URL`. Live subscribe stays on `XAHAUD_URL` at the current tip; this node fills last-indexed → tip first, then walks backward.
+- `BACKFILL_XAHAUD_URL` — optional dedicated history node (`ws`/`wss` or `http`/`https` JSON-RPC). Unset = reuse `XAHAUD_URL`. Live subscribe stays on `XAHAUD_URL` at the current tip; this node fills last-indexed → tip first, then walks backward. A dropped history connection reconnects and retries forever; it does not skip ledgers.
 - `BACKFILL_ENV` — optional second env file for that node URL. Auto-loads `.env.backfill` when present.
 - `BACKFILL_MIN_INTERVAL_MS` — delay between historical fetches. Unset = `2000` when sharing the live node (public RPC quotas), `0` on a dedicated history URL. A shared node also gives live fetches priority and pauses backfill after `tooBusy`.
 - `BACKFILL_CONCURRENCY` — in-flight historical RPC fetches on a dedicated `BACKFILL_XAHAUD_URL`. Default `1`, cap `32`. Sharing `XAHAUD_URL` always uses `1`. Fetch starts are staggered by `BACKFILL_MIN_INTERVAL_MS`. A `tooBusy` / units-quota 429 drops in-flight to 1 until a few fetches succeed. Apply stays in ledger order. File import is unchanged (`HISTORY_WORKERS` is decode stripes only).

@@ -703,6 +703,45 @@ describe('fillLiveGap', () => {
     assert.equal(getLatestLedgerIndex(db), 14);
     assert.equal(readLiveGap(db), null);
   });
+
+  it('reconnects on NotConnectedError and does not skip the ledger', async () => {
+    const db = memoryDb();
+    seedSnapshot(db, 10);
+    setIndexerState(db, LIVE_GAP_FROM, '11');
+    setIndexerState(db, LIVE_GAP_THROUGH, '12');
+    setIndexerState(db, LIVE_GAP_NEXT, '11');
+    const requested: number[] = [];
+    let reconnects = 0;
+    let failures = 0;
+    const result = await fillLiveGap({
+      db,
+      fetchAttempts: 1,
+      retryMinMs: 1,
+      source: {
+        getLedgerWithTransactions: async (index) => {
+          requested.push(index);
+          if (index === 11 && failures < 3) {
+            failures += 1;
+            const error = new Error(JSON.stringify({ command: 'ledger', ledger_index: index }));
+            error.name = 'NotConnectedError';
+            throw error;
+          }
+          return closedLedger(index, []);
+        },
+        reconnect: async () => {
+          reconnects += 1;
+        },
+      },
+      log: silentLog,
+    });
+    assert.equal(result.skipped, false);
+    assert.equal(result.applied, 2);
+    assert.equal(result.skippedLedgers, 0);
+    assert.ok(reconnects >= 3);
+    assert.deepEqual(requested, [11, 11, 11, 11, 12]);
+    assert.equal(getLatestLedgerIndex(db), 12);
+    assert.equal(readLiveGap(db), null);
+  });
 });
 
 describe('runDedicatedBackfill', () => {

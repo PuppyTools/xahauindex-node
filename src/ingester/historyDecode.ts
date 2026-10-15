@@ -1,4 +1,4 @@
-import { decode } from '@transia/xrpl';
+import { decode } from 'xahau';
 
 export const HISTORY_TX_TYPES = [
   'Payment',

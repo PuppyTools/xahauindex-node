@@ -38,6 +38,29 @@ describe('retry', () => {
     assert.equal(attempts, 3);
   });
 
+  it('does not consume attempts when retryForever matches', async () => {
+    let attempts = 0;
+    const error = new Error('{"command":"ledger"}');
+    error.name = 'NotConnectedError';
+    const value = await retry(
+      async () => {
+        attempts += 1;
+        if (attempts < 4) {
+          throw error;
+        }
+        return 9;
+      },
+      {
+        minMs: 1,
+        maxMs: 2,
+        attempts: 1,
+        retryForever: (err) => err instanceof Error && err.name === 'NotConnectedError',
+      },
+    );
+    assert.equal(value, 9);
+    assert.equal(attempts, 4);
+  });
+
   it('throws after the last attempt', async () => {
     await assert.rejects(
       () =>
