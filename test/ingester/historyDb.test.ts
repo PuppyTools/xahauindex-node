@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import { afterEach, describe, it } from 'node:test';
 
 import Database from 'better-sqlite3';
-import { encode, unixTimeToRippleTime } from '@transia/xrpl';
+import { encode, unixTimeToRippleTime } from 'xahau';
 
 import {
   DEFAULT_HISTORY_BATCH_SIZE,

@@ -1,4 +1,4 @@
-import { Client, rippleTimeToUnixTime, type LedgerStream } from '@transia/xrpl';
+import { Client, rippleTimeToUnixTime, type LedgerStream } from 'xahau';
 
 import { BACKFILL_QUOTA_PAUSE_MS, NodeQuota } from '../util/quota.js';
 

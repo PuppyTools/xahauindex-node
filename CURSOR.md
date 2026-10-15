@@ -16,7 +16,7 @@ Repo: `github.com/PuppyTools/xahauindex-node`
 | Runtime | Node.js 22+ ESM | better-sqlite3 13 requires Node 22+ |
 | Build | `tsc` → `dist/` | Standard, no bundler complexity needed |
 | Database | SQLite (`better-sqlite3`) | Zero-dependency self-hosting |
-| Ledger client | `@transia/xrpl` | Xahau-specific types (URIToken, SetHook, SetRemarks) |
+| Ledger client | `xahau` (`xahau.js`) | Xahau-specific types (URIToken, SetHook, SetRemarks) |
 | HTTP server | Fastify v5 + TypeBox | Performance, compile-time safe schemas |
 | WS server | `@fastify/websocket` | Integrates with Fastify lifecycle |
 | Migrations | numbered SQL files, append-only | Simple |
@@ -24,7 +24,7 @@ Repo: `github.com/PuppyTools/xahauindex-node`
 | Logging | `pino` | Structured JSON, low overhead |
 | Tests | `node:test` | No extra deps |
 
-`@transia/xrpl` is a transport + helper library. **All Xahau ledger object shapes we persist are typed in `src/types/xahau.ts`.** Do not assume the package is complete for HookOn v2 or Remarks.
+`xahau` is a transport + helper library. **All Xahau ledger object shapes we persist are typed in `src/types/xahau.ts`.** Do not assume the package is complete for HookOn v2 or Remarks.
 
 ## TypeScript rules
 
@@ -111,7 +111,7 @@ v1 indexes remarks on URITokens, issuer AccountRoots, and issuer-side RippleStat
 - Amounts: always **strings**
 
 ### Account addresses
-Always base58 r-address. Validate with `@transia/xrpl` `isValidAddress()`.
+Always base58 r-address. Validate with `xahau` `isValidAddress()`.
 
 ### Blackholed
 `lsfDisableMaster` **and** (no `RegularKey` **or** RegularKey is a known blackhole address).

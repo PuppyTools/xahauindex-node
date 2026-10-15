@@ -38,7 +38,7 @@ XahauIndex has three layers: an **ingester** (snapshot + live WebSocket), a **SQ
 ## Boot sequence
 
 1. Open SQLite, run migrations, enable WAL + `busy_timeout`.
-2. Connect `@transia/xrpl` `Client` to `XAHAUD_URL` (default mainnet).
+2. Connect `xahau` `Client` to `XAHAUD_URL` (default mainnet).
 3. If `indexer_state.snapshot_status` is not `complete`, run the snapshot.
 4. Start the TOML worker and the URI metadata worker (icon URLs only).
 5. Subscribe to `ledger` on `XAHAUD_URL` at the current tip. Live catch-up starts at the live node's `complete_ledgers` floor (or the tip if that range is unknown), not last-indexed + 1. Ignore live apply at or before `snapshot_ledger`.
@@ -80,7 +80,7 @@ Objects consumed during snapshot:
 
 Optional backward walk. After snapshot and after the live-gap fill:
 
-- If `BACKFILL_FROM_DB=true`, open `HISTORY_LEDGER_DB` + `HISTORY_TX_DB` read-only (`ledger.db` / `transaction.db` from a **copy** of a full-history xahaud node — not NuDB, not a live WAL). Filter `Status='V'` and Offer/Payment/URIToken types, decode `RawTxn` + `TxnMeta` with `@transia/xrpl`, and call `applyHistoricalLedger` walking **forward**. Cap at `snapshot_ledger`. Resume `history_db_next`. Do not skip snapshot.
+- If `BACKFILL_FROM_DB=true`, open `HISTORY_LEDGER_DB` + `HISTORY_TX_DB` read-only (`ledger.db` / `transaction.db` from a **copy** of a full-history xahaud node — not NuDB, not a live WAL). Filter `Status='V'` and Offer/Payment/URIToken types, decode `RawTxn` + `TxnMeta` with `xahau`, and call `applyHistoricalLedger` walking **forward**. Cap at `snapshot_ledger`. Resume `history_db_next`. Do not skip snapshot.
 - If `HISTORY_CATALOGUE` is set, stream a xahaud CATL file or a directory of them (`catalogue_create`, magic `CATL`, zlib payload when the header compression nibble is > 0). Directories are non-recursive: read each regular file's 88-byte header, keep CATL v1, sort by `minLedger`. Skip a file whose target range is already inside the imported union. Skip a ledger's state SHAMap when `accountHash` is unchanged from the previous ledger (xahaud writes **0 state bytes** in that case, not a TERMINAL). Decode `tnTRANSACTION_MD` leaves as VL(tx)+VL(meta), keep Offer/Payment/URIToken types, `applyHistoricalLedger`. Resume mid-file via `history_catalogue_ckpt` (ledger seq + pending bytes + zlib zran access point: compressed offset, leftover bits, 32KiB window) so a restart seeks instead of re-inflating the prefix of that file. Catch-up to that cursor parses SHAMaps from a buffered stream (not per-leaf awaits) and only writes a zlib checkpoint every 50 000 skipped ledgers. If the payload ends before the header `maxLedger`, treat the file as truncated: set `history_db_through` to the last complete ledger, stop the directory walk so later packs do not hide the hole, leave status `running`, and let RPC fill from there. An empty payload is still a hard error. SHA-512 header verification is not done in v1. Do not `catalogue_load` the file into xahaud. Cap at `snapshot_ledger`. Snapshot is still required — catalogues do not replace current-state ingest. Docker Compose bind-mounts the host path from `.env` onto `/import/catalogue` (file or directory) so operators do not edit the compose file. `HISTORY_LEDGER_DB` / `HISTORY_TX_DB` use the same pattern.
 - Then if `BACKFILL_FROM_LEDGER` (alias `FULL_HISTORY_START`; `genesis`/`start` → `1`) or `BACKFILL_LOOKBACK` is set, walk `snapshot_ledger` down to `FROM` inclusive. Ledgers already imported from files are not refetched.
 
@@ -482,7 +482,7 @@ Optional. Off unless `API_RATE_LIMIT_MAX` is a positive integer. Still no API ke
 
 **Why SQLite?** Zero-dependency self-hosting. Xahau throughput fits a single-writer file. Postgres can wait for v3.
 
-**Why `@transia/xrpl`?** Official `xrpl` does not model URIToken / SetHook / SetRemarks. The Transia fork is the Xahau client. We still own our types.
+**Why `xahau`?** Official `xrpl` does not model URIToken / SetHook / SetRemarks. `xahau` (`xahau.js`) is the Xahau Network client. We still own our types.
 
 **Why two-segment URLs?** `:` and `+` are unsafe or ambiguous in URIs. `/USD/r…` is unambiguous.
 

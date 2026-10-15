@@ -1,7 +1,7 @@
 import { existsSync } from 'node:fs';
 
 import Database from 'better-sqlite3';
-import { rippleTimeToUnixTime } from '@transia/xrpl';
+import { rippleTimeToUnixTime } from 'xahau';
 
 import { resolveBackfillFrom, type Config } from '../config.js';
 import type { SqliteDatabase } from '../db/client.js';

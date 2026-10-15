@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import { afterEach, describe, it } from 'node:test';
 import { deflateSync } from 'node:zlib';
 
-import { encode, unixTimeToRippleTime } from '@transia/xrpl';
+import { encode, unixTimeToRippleTime } from 'xahau';
 
 import { ConfigError, loadConfig } from '../../src/config.js';
 import { closeDatabase, openDatabase, type SqliteDatabase } from '../../src/db/client.js';

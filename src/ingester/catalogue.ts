@@ -2,7 +2,7 @@ import { readdirSync, statSync } from 'node:fs';
 import { open, type FileHandle } from 'node:fs/promises';
 import { join } from 'node:path';
 
-import { rippleTimeToUnixTime } from '@transia/xrpl';
+import { rippleTimeToUnixTime } from 'xahau';
 
 import { HISTORY_TX_TYPES, decodeHistoryTransaction } from './historyDecode.js';
 import { NodeZlibFileInflate, ZlibCatalogueInflate, zlibRandomAccessAvailable } from './zlibInflate.js';

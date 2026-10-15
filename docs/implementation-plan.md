@@ -11,7 +11,7 @@ Do not start coding against the original attached drafts. Those drafts are super
 | # | Decision | Choice |
 |---|----------|--------|
 | 1 | First-boot data | **Current-ledger snapshot**, then live ingest from `snapshot_ledger + 1`. No historical transaction backfill in v1. |
-| 2 | Ledger client | **`@transia/xrpl`** (Xahau-aware). Still define our own ledger-object types; do not blindly trust upstream shapes. |
+| 2 | Ledger client | **`xahau`** (Xahau-aware `xahau.js`). Still define our own ledger-object types; do not blindly trust upstream shapes. |
 | 3 | Prices | **Historical calendar candles** plus `from`/`to` time and `from_ledger`/`to_ledger` range filters. |
 | 4 | Remarks | Index remarks on **URITokens, issuer AccountRoots, and issuer-side trust lines**. Ingest `SetRemarks`. |
 | 5 | URL identifiers | **Two path segments**, never `:` or `+` in a single token. Example: `/v1/tokens/USD/rHb9…`. |
@@ -55,7 +55,7 @@ That implies endpoints the original draft omitted: **holders**, **trades**, and 
 | Runtime | Node.js 20+ ESM |
 | Build | `tsc` → `dist/` |
 | DB | SQLite via `better-sqlite3`, WAL, numbered SQL migrations |
-| Ledger | `@transia/xrpl` `Client` |
+| Ledger | `xahau` `Client` |
 | HTTP | Fastify v5 + TypeBox |
 | WS | `@fastify/websocket` |
 | Config | `dotenv` |
@@ -94,7 +94,7 @@ One Node process, two roles, one SQLite file:
 ```
 boot
   ├─ open DB + migrate
-  ├─ connect @transia/xrpl Client to XAHAUD_URL
+  ├─ connect xahau Client to XAHAUD_URL
   ├─ if snapshot incomplete → snapshot current validated ledger
   ├─ start TOML worker (async, never inside a ledger write)
   ├─ subscribe ledger + transactions
@@ -361,7 +361,7 @@ Compose volume, healthcheck on `/v1/status`, README quick start verified with `d
 
 | Risk | Mitigation |
 |------|------------|
-| `@transia/xrpl` types lag Remarks / HookOn v2 | Own types in `src/types/xahau.ts`; treat client as a WS/RPC transport |
+| `xahau` types lag Remarks / HookOn v2 | Own types in `src/types/xahau.ts`; treat client as a WS/RPC transport |
 | Public `wss://xahau.network` rate-limits `ledger_data` | Page slowly, persist marker, honour 429/backoff; document self-hosted xahaud as production |
 | Snapshot is large | Stream pages; do not hold the full ledger in memory; WAL + periodic commits per page |
 | Offer metadata shapes vary | Strict type guards; skip + `warn` with tx hash; add a fixture when a new shape appears |
