@@ -249,6 +249,45 @@ export async function fillLiveGap(options: {
   return { skipped: false, from: gap.from, through: gap.through, applied, skippedLedgers };
 }
 
+export const LIVE_GAP_POLL_MS = 1_000;
+
+type LiveGapFillOptions = Parameters<typeof fillLiveGap>[0];
+
+/**
+ * Keep filling subscribe gaps until abort. Live stays at the tip; this walk
+ * on the history node closes holes recorded while catalogue skip-scan (or
+ * anything else) makes the live node jump its complete_ledgers floor.
+ */
+export async function runLiveGapFillLoop(
+  options: LiveGapFillOptions & { pollMs?: number },
+): Promise<void> {
+  const { db, log } = options;
+  const pollMs = options.pollMs ?? LIVE_GAP_POLL_MS;
+  while (!options.signal?.aborted) {
+    if (readLiveGap(db) === null) {
+      try {
+        await sleep(pollMs, options.signal);
+      } catch {
+        return;
+      }
+      continue;
+    }
+    try {
+      await fillLiveGap(options);
+    } catch (error) {
+      if (options.signal?.aborted) {
+        return;
+      }
+      log.error({ err: error }, 'live gap fill failed; retrying');
+      try {
+        await sleep(pollMs, options.signal);
+      } catch {
+        return;
+      }
+    }
+  }
+}
+
 export async function runBackfill(options: {
   db: SqliteDatabase;
   source: Pick<LiveLedgerSource, 'getLedgerWithTransactions' | 'quota' | 'reconnect'>;
