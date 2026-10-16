@@ -14,6 +14,7 @@ import { getIndexerState, setIndexerState, upsertLedger } from '../../src/db/que
 import {
   CATL_HEADER_SIZE,
   CATL_MAGIC,
+  CATALOGUE_SKIP_YIELD_EVERY,
   CATALOGUE_VERSION,
   CatalogueError,
   CatalogueTruncatedError,
@@ -445,6 +446,10 @@ describe('iterateCatalogueLedgers', () => {
       seqs.push(item.ledger.index);
     }
     assert.deepEqual(seqs, [42]);
+  });
+
+  it('yields the event loop this often while skip-scanning to a resume cursor', () => {
+    assert.equal(CATALOGUE_SKIP_YIELD_EVERY, 100);
   });
 
   it('skip-scans a zlib catalogue with checkpoints without losing later ledgers', async () => {

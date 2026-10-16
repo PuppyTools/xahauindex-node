@@ -11,6 +11,8 @@ export const CATL_MAGIC = 0x4c_54_41_43;
 export const CATL_HEADER_SIZE = 88;
 export const CATALOGUE_VERSION = 1;
 export const XAHAU_MAINNET_ID = 21337;
+/** Yield to live subscribe this often while skip-scanning to a resume cursor. */
+export const CATALOGUE_SKIP_YIELD_EVERY = 100;
 const PAYLOAD_CHUNK = 256 * 1024;
 const LEDGER_INFO_SIZE = 164;
 
@@ -624,7 +626,7 @@ export async function* iterateCatalogueLedgers(
         if (options?.onSkipProgress !== undefined && info.seq % skipCheckpointEvery === 0) {
           await options.onSkipProgress({ seq: info.seq, scanned: skipped, checkpoint });
         }
-        if (skipped % 2_000 === 0) {
+        if (skipped % CATALOGUE_SKIP_YIELD_EVERY === 0) {
           await new Promise<void>((resolve) => {
             setImmediate(resolve);
           });

@@ -16,6 +16,7 @@ import {
   fillLiveGap,
   resumeBackfillIndex,
   runBackfill,
+  runLiveGapFillLoop,
 } from '../../src/ingester/backfill.js';
 import { runDedicatedBackfill } from '../../src/ingester/index.js';
 import { LIVE_GAP_FROM, LIVE_GAP_NEXT, LIVE_GAP_THROUGH, readLiveGap } from '../../src/ingester/live.js';
@@ -53,6 +54,18 @@ function closedLedger(index: number, transactions: unknown[]): ClosedLedger {
     closeTime: 1_700_000_000 + index,
     transactions,
   };
+}
+
+async function waitUntil(check: () => boolean, timeoutMs = 2_000): Promise<void> {
+  const start = Date.now();
+  while (!check()) {
+    if (Date.now() - start > timeoutMs) {
+      throw new Error('timed out');
+    }
+    await new Promise<void>((resolve) => {
+      setTimeout(resolve, 10);
+    });
+  }
 }
 
 function seedSnapshot(db: SqliteDatabase, ledger: number): void {
@@ -744,6 +757,63 @@ describe('fillLiveGap', () => {
   });
 });
 
+describe('runLiveGapFillLoop', () => {
+  it('fills a later subscribe gap after the first walk completes', async () => {
+    const db = memoryDb();
+    seedSnapshot(db, 10);
+    setIndexerState(db, LIVE_GAP_FROM, '11');
+    setIndexerState(db, LIVE_GAP_THROUGH, '12');
+    setIndexerState(db, LIVE_GAP_NEXT, '11');
+    const requested: number[] = [];
+    const controller = new AbortController();
+    const loop = runLiveGapFillLoop({
+      db,
+      pollMs: 10,
+      source: {
+        getLedgerWithTransactions: async (index) => {
+          requested.push(index);
+          return closedLedger(index, []);
+        },
+      },
+      log: silentLog,
+      signal: controller.signal,
+    });
+    await waitUntil(() => getLatestLedgerIndex(db) === 12);
+    assert.deepEqual(requested, [11, 12]);
+    assert.equal(readLiveGap(db), null);
+
+    setIndexerState(db, LIVE_GAP_FROM, '14');
+    setIndexerState(db, LIVE_GAP_THROUGH, '15');
+    setIndexerState(db, LIVE_GAP_NEXT, '14');
+    await waitUntil(() => getLatestLedgerIndex(db) === 15);
+    assert.deepEqual(requested, [11, 12, 14, 15]);
+    assert.equal(readLiveGap(db), null);
+
+    controller.abort();
+    await loop;
+  });
+
+  it('stops polling when aborted', async () => {
+    const db = memoryDb();
+    seedSnapshot(db, 10);
+    const controller = new AbortController();
+    const loop = runLiveGapFillLoop({
+      db,
+      pollMs: 10,
+      source: {
+        getLedgerWithTransactions: async () => {
+          throw new Error('no gap should be fetched');
+        },
+      },
+      log: silentLog,
+      signal: controller.signal,
+    });
+    controller.abort();
+    await loop;
+    assert.equal(readLiveGap(db), null);
+  });
+});
+
 describe('runDedicatedBackfill', () => {
   it('keeps live subscribe on XAHAUD_URL and fetches history from JSON-RPC', async () => {
     const requested: number[] = [];
@@ -917,5 +987,58 @@ describe('runDedicatedBackfill', () => {
     assert.equal(result.skipped, false);
     assert.equal(result.applied, 3);
     assert.equal(max, 1);
+  });
+
+  it('fills a new subscribe gap while the historical walk is still running', async () => {
+    const db = memoryDb();
+    seedSnapshot(db, 10);
+    setIndexerState(db, LIVE_GAP_FROM, '11');
+    setIndexerState(db, LIVE_GAP_THROUGH, '11');
+    setIndexerState(db, LIVE_GAP_NEXT, '11');
+    const requested: number[] = [];
+    const controller = new AbortController();
+    let releaseWalk: (() => void) | undefined;
+    const walkGate = new Promise<void>((resolve) => {
+      releaseWalk = resolve;
+    });
+    const run = runDedicatedBackfill({
+      db,
+      liveSource: {
+        getLedgerWithTransactions: async (index) => {
+          requested.push(index);
+          if (index <= 10) {
+            await walkGate;
+          }
+          return closedLedger(index, []);
+        },
+      },
+      config: testConfig({
+        xahaudUrl: 'wss://live.example',
+        backfillFromLedger: 10,
+      }),
+      log: silentLog,
+      signal: controller.signal,
+      pollMs: 10,
+      fetchAttempts: 1,
+      retryMinMs: 1,
+    });
+    try {
+      await waitUntil(() => getLatestLedgerIndex(db) === 11);
+      setIndexerState(db, LIVE_GAP_FROM, '13');
+      setIndexerState(db, LIVE_GAP_THROUGH, '14');
+      setIndexerState(db, LIVE_GAP_NEXT, '13');
+      await waitUntil(() => getLatestLedgerIndex(db) === 14);
+      releaseWalk?.();
+      await waitUntil(() => getIndexerState(db, 'backfill_status') === 'complete');
+      assert.ok(requested.includes(11));
+      assert.ok(requested.includes(13));
+      assert.ok(requested.includes(14));
+      assert.ok(requested.includes(10));
+      assert.equal(readLiveGap(db), null);
+    } finally {
+      releaseWalk?.();
+      controller.abort();
+      await run;
+    }
   });
 });

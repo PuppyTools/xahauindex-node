@@ -11,7 +11,7 @@ import {
 } from '../config.js';
 import type { SqliteDatabase } from '../db/client.js';
 import type { Runtime } from '../runtime.js';
-import { fillLiveGap, runBackfill, type BackfillResult } from './backfill.js';
+import { fillLiveGap, runBackfill, runLiveGapFillLoop, type BackfillResult } from './backfill.js';
 import { runCatalogueImport } from './catalogueImport.js';
 import { runHistoryDbImport } from './historyDb.js';
 import { snapshotLedgerBound } from './ledger.js';
@@ -145,6 +145,7 @@ export async function runDedicatedBackfill(options: {
   signal?: AbortSignal;
   fetchAttempts?: number;
   retryMinMs?: number;
+  pollMs?: number;
 }): Promise<BackfillResult> {
   const url = resolveBackfillSourceUrl(options.config);
   const snapshot = snapshotLedgerBound(options.db);
@@ -154,7 +155,7 @@ export async function runDedicatedBackfill(options: {
   const requestedConcurrency = options.config.backfillConcurrency;
   const concurrency = resolveBackfillConcurrency(options.config, dedicated);
   const history =
-    dedicated && (from !== null || gap !== null)
+    dedicated && (from !== null || gap !== null || options.signal !== undefined)
       ? createBackfillSource(url, { maxConcurrent: concurrency })
       : null;
   const minIntervalMs = resolveBackfillMinIntervalMs(options.config, dedicated && from !== null);
@@ -199,11 +200,11 @@ export async function runDedicatedBackfill(options: {
     ...(options.fetchAttempts === undefined ? {} : { fetchAttempts: options.fetchAttempts }),
     ...(options.retryMinMs === undefined ? {} : { retryMinMs: options.retryMinMs }),
   };
-  try {
-    await fillLiveGap({
-      ...shared,
-      minIntervalMs: gapIntervalMs,
-    });
+  const gapFill = {
+    ...shared,
+    minIntervalMs: gapIntervalMs,
+  };
+  const importHistory = async (): Promise<BackfillResult> => {
     if (options.config.historyFromDb) {
       try {
         await runHistoryDbImport({
@@ -239,6 +240,22 @@ export async function runDedicatedBackfill(options: {
       config: options.config,
       minIntervalMs,
     });
+  };
+  try {
+    await fillLiveGap(gapFill);
+    if (options.signal === undefined) {
+      return await importHistory();
+    }
+    const files = importHistory();
+    const gaps = runLiveGapFillLoop({
+      ...gapFill,
+      ...(options.pollMs === undefined ? {} : { pollMs: options.pollMs }),
+    });
+    try {
+      return await files;
+    } finally {
+      await gaps;
+    }
   } finally {
     if (history) {
       await history.disconnect();
