@@ -28,7 +28,12 @@ import {
   splitTxMeta,
   type CatalogueCheckpoint,
 } from '../../src/ingester/catalogue.js';
-import { HISTORY_CATALOGUE_CKPT, HISTORY_CATALOGUE_PATH, runCatalogueImport } from '../../src/ingester/catalogueImport.js';
+import {
+  HISTORY_CATALOGUE_CKPT,
+  HISTORY_CATALOGUE_PATH,
+  HISTORY_CATALOGUE_TRUNCATED,
+  runCatalogueImport,
+} from '../../src/ingester/catalogueImport.js';
 import { zlibRandomAccessAvailable } from '../../src/ingester/zlibInflate.js';
 import {
   HISTORY_DB_FROM,
@@ -36,6 +41,7 @@ import {
   HISTORY_DB_NEXT,
   HISTORY_DB_STATUS,
   HISTORY_DB_THROUGH,
+  historyImportedRanges,
 } from '../../src/ingester/historyDb.js';
 import { silentLog, testConfig } from '../helpers.js';
 
@@ -892,9 +898,29 @@ describe('runCatalogueImport', () => {
     assert.equal(getIndexerState(db, HISTORY_DB_THROUGH), '42');
     assert.equal(getIndexerState(db, HISTORY_DB_NEXT), '43');
     assert.equal(listDexTrades(db, PAIR, { limit: 10 }).length, 1);
+    assert.equal(getIndexerState(db, HISTORY_CATALOGUE_TRUNCATED) !== undefined, true);
+
+    const messages: string[] = [];
+    const again = await runCatalogueImport({
+      db,
+      config: testConfig({ historyCatalogue: path, backfillFromLedger: 1 }),
+      log: {
+        ...silentLog,
+        info: (_obj, msg) => {
+          messages.push(msg);
+        },
+      },
+    });
+    assert.equal(again.skipped, true);
+    assert.ok(messages.includes('catalogue file skipped; payload already ended'));
+    assert.equal(
+      messages.includes('catalogue import scanning to resume point'),
+      false,
+    );
+    assert.equal(getIndexerState(db, HISTORY_DB_THROUGH), '42');
   });
 
-  it('does not walk later directory files after a truncated CATL', async () => {
+  it('walks later directory files after a truncated CATL and keeps the hole', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'xahauindex-catdir-'));
     const account = Buffer.alloc(32, 1);
     const first = offerPayload('aa'.repeat(32));
@@ -949,15 +975,17 @@ describe('runCatalogueImport', () => {
       log: silentLog,
     });
     assert.equal(result.skipped, false);
-    assert.equal(result.through, 42);
+    assert.equal(result.through, 46);
     assert.equal(getIndexerState(db, HISTORY_DB_STATUS), 'running');
-    assert.equal(getIndexerState(db, HISTORY_DB_THROUGH), '42');
-    assert.equal(getIndexerState(db, HISTORY_DB_NEXT), '43');
-    assert.equal(listDexTrades(db, PAIR, { limit: 10 }).length, 1);
-    assert.equal(
-      listDexTrades(db, PAIR, { limit: 10 }).some((trade) => trade.tx_hash === 'DD'.repeat(32)),
-      false,
-    );
+    assert.equal(getIndexerState(db, HISTORY_DB_THROUGH), '46');
+    assert.equal(getIndexerState(db, HISTORY_DB_NEXT), '47');
+    assert.deepEqual(historyImportedRanges(db), [
+      { from: 40, through: 42 },
+      { from: 46, through: 46 },
+    ]);
+    const trades = listDexTrades(db, PAIR, { limit: 10 });
+    assert.equal(trades.length, 2);
+    assert.ok(trades.some((trade) => trade.tx_hash === 'DD'.repeat(32)));
   });
 
   it('resets a claimed header max when skip-scan hits a truncated payload', async () => {
