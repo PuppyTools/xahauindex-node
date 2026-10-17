@@ -4,7 +4,7 @@ import { getIndexerState, setIndexerState } from '../db/queries/indexer.js';
 import { withQuota } from '../util/quota.js';
 import { retry, sleep } from '../util/retry.js';
 import { applyClosedLedger, applyHistoricalLedger } from './ledger.js';
-import { historyImportedRange } from './historyDb.js';
+import { historyImportedRanges } from './historyDb.js';
 import {
   LIVE_GAP_NEXT,
   readLiveGap,
@@ -342,15 +342,19 @@ export async function runBackfill(options: {
   setIndexerState(db, 'backfill_direction', BACKFILL_DIRECTION);
   setIndexerState(db, 'backfill_next', String(index));
   setIndexerState(db, 'backfill_status', 'running');
-  const imported = historyImportedRange(db);
+  const imported = historyImportedRanges(db);
   const minIntervalMs = options.minIntervalMs ?? 0;
   const concurrency = Math.max(1, options.concurrency ?? 1);
+  const importedFrom = imported[0]?.from;
+  const importedThrough = imported.at(-1)?.through;
   log.info(
     {
       ...backfillProgress(from, through, index),
       minIntervalMs,
       concurrency,
-      ...(imported === null ? {} : { historyDbFrom: imported.from, historyDbThrough: imported.through }),
+      ...(importedFrom === undefined || importedThrough === undefined
+        ? {}
+        : { historyDbFrom: importedFrom, historyDbThrough: importedThrough, historyDbRanges: imported.length }),
     },
     'historical backfill starting (snapshot → FROM)',
   );
@@ -367,19 +371,21 @@ export async function runBackfill(options: {
     launchDelayMs: minIntervalMs,
     inRange: (cursor) => cursor >= from,
     jump: (cursor) => {
-      if (imported !== null && cursor >= imported.from && cursor <= imported.through) {
-        return imported.from - 1;
+      for (const span of imported) {
+        if (cursor >= span.from && cursor <= span.through) {
+          return span.from - 1;
+        }
       }
       return null;
     },
     onJump: (_fromIndex, jumpedTo) => {
       setIndexerState(db, 'backfill_next', String(jumpedTo));
-      if (!loggedJump && imported !== null) {
+      if (!loggedJump && imported.length > 0) {
         loggedJump = true;
         log.info(
           {
-            skippedFrom: imported.from,
-            skippedThrough: imported.through,
+            skippedFrom: imported[0]?.from,
+            skippedThrough: imported.at(-1)?.through,
             next: jumpedTo,
           },
           'RPC backfill jumping history DB import range',

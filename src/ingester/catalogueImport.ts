@@ -1,4 +1,4 @@
-import { existsSync } from 'node:fs';
+import { existsSync, statSync } from 'node:fs';
 import { resolve as resolvePath } from 'node:path';
 
 import { resolveBackfillFrom, type Config } from '../config.js';
@@ -21,8 +21,10 @@ import {
   HISTORY_DB_NEXT,
   HISTORY_DB_STATUS,
   HISTORY_DB_THROUGH,
+  addHistoryImportedRange,
   historyImportTargetRange,
   historyImportedRange,
+  historyImportedRanges,
   type HistoryDbImportResult,
 } from './historyDb.js';
 import { applyHistoricalLedger, snapshotLedgerBound } from './ledger.js';
@@ -30,8 +32,15 @@ import type { LiveLogger } from './live.js';
 
 export const HISTORY_CATALOGUE_PATH = 'history_catalogue_path';
 export const HISTORY_CATALOGUE_CKPT = 'history_catalogue_ckpt';
+export const HISTORY_CATALOGUE_TRUNCATED = 'history_catalogue_truncated';
 export const CATALOGUE_CHECKPOINT_EVERY = 1000;
 export const CATALOGUE_SKIP_CHECKPOINT_EVERY = 50_000;
+
+interface TruncatedCatalogueFile {
+  path: string;
+  lastSeq: number;
+  fileSize: number;
+}
 
 function parseStateInt(db: SqliteDatabase, key: string): number | null {
   const raw = getIndexerState(db, key);
@@ -50,8 +59,59 @@ function resumeNext(storedNext: number | null, target: { from: number; through: 
 }
 
 function targetContained(db: SqliteDatabase, target: { from: number; through: number }): boolean {
-  const imported = historyImportedRange(db);
-  return imported !== null && target.from >= imported.from && target.through <= imported.through;
+  return historyImportedRanges(db).some((span) => target.from >= span.from && target.through <= span.through);
+}
+
+function loadTruncatedFiles(db: SqliteDatabase): TruncatedCatalogueFile[] {
+  const raw = getIndexerState(db, HISTORY_CATALOGUE_TRUNCATED);
+  if (raw === undefined || raw === '') {
+    return [];
+  }
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    const entries = Array.isArray(parsed) ? parsed : [parsed];
+    const files: TruncatedCatalogueFile[] = [];
+    for (const entry of entries) {
+      if (
+        entry !== null &&
+        typeof entry === 'object' &&
+        typeof (entry as TruncatedCatalogueFile).path === 'string' &&
+        Number.isInteger((entry as TruncatedCatalogueFile).lastSeq) &&
+        Number.isInteger((entry as TruncatedCatalogueFile).fileSize)
+      ) {
+        files.push({
+          path: (entry as TruncatedCatalogueFile).path,
+          lastSeq: (entry as TruncatedCatalogueFile).lastSeq,
+          fileSize: (entry as TruncatedCatalogueFile).fileSize,
+        });
+      }
+    }
+    return files;
+  } catch {
+    return [];
+  }
+}
+
+function saveTruncatedFiles(db: SqliteDatabase, files: TruncatedCatalogueFile[]): void {
+  setIndexerState(db, HISTORY_CATALOGUE_TRUNCATED, JSON.stringify(files));
+}
+
+function rememberTruncatedFile(db: SqliteDatabase, file: TruncatedCatalogueFile): void {
+  const files = loadTruncatedFiles(db).filter((entry) => entry.path !== file.path);
+  files.push(file);
+  saveTruncatedFiles(db, files);
+}
+
+function truncatedSkip(db: SqliteDatabase, path: string, next: number): TruncatedCatalogueFile | null {
+  const match = loadTruncatedFiles(db).find((entry) => entry.path === path);
+  if (match === undefined || next <= match.lastSeq) {
+    return null;
+  }
+  try {
+    return statSync(path).size === match.fileSize ? match : null;
+  } catch {
+    return null;
+  }
 }
 
 interface StoredCheckpoint {
@@ -188,6 +248,29 @@ async function importCatalogueFile(options: {
   if (file.header.networkId !== 0 && file.header.networkId !== XAHAU_MAINNET_ID) {
     log.warn({ networkId: file.header.networkId, expected: XAHAU_MAINNET_ID }, 'catalogue network_id is not Xahau mainnet');
   }
+  const alreadyTruncated = truncatedSkip(db, file.path, next);
+  if (alreadyTruncated !== null) {
+    addHistoryImportedRange(db, { from: target.from, through: alreadyTruncated.lastSeq });
+    log.info(
+      {
+        path: file.path,
+        lastSeq: alreadyTruncated.lastSeq,
+        next,
+        dumpFrom: file.header.minLedger,
+        dumpThrough: file.header.maxLedger,
+      },
+      'catalogue file skipped; payload already ended',
+    );
+    return {
+      applied: 0,
+      decoded: 0,
+      skipped: true,
+      truncated: true,
+      from: overallFrom,
+      through: alreadyTruncated.lastSeq,
+    };
+  }
+
   const loaded = loadCheckpoint(db, file.path, next);
   const resume = checkpointUsable(file, loaded) ? loaded : undefined;
   const skipUntil = Math.max(target.from, next);
@@ -270,6 +353,7 @@ async function importCatalogueFile(options: {
       setIndexerState(db, HISTORY_DB_LEDGER, String(seq));
       setIndexerState(db, HISTORY_DB_NEXT, String(cursor));
       setIndexerState(db, HISTORY_DB_THROUGH, String(currentThrough !== null ? Math.max(currentThrough, seq) : seq));
+      addHistoryImportedRange(db, { from: target.from, through: seq });
       if (seq % CATALOGUE_CHECKPOINT_EVERY === 0) {
         saveCheckpoint(db, await item.checkpoint());
       }
@@ -294,6 +378,20 @@ async function importCatalogueFile(options: {
       setIndexerState(db, HISTORY_DB_NEXT, String(lastSeq + 1));
     }
     setIndexerState(db, HISTORY_CATALOGUE_CKPT, '');
+    let fileSize = error.fileSize;
+    if (fileSize === null) {
+      try {
+        fileSize = statSync(file.path).size;
+      } catch {
+        fileSize = null;
+      }
+    }
+    if (fileSize !== null) {
+      rememberTruncatedFile(db, { path: file.path, lastSeq, fileSize });
+    }
+    if (importedThrough >= target.from) {
+      addHistoryImportedRange(db, { from: target.from, through: importedThrough });
+    }
     log.warn(
       {
         path: file.path,
@@ -339,6 +437,7 @@ async function importCatalogueFile(options: {
   }
   const finishedThrough = storedThrough !== null ? Math.max(storedThrough, target.through) : target.through;
   setIndexerState(db, HISTORY_DB_THROUGH, String(finishedThrough));
+  addHistoryImportedRange(db, { from: target.from, through: target.through });
   return { applied, decoded, skipped: false, truncated: false, from: overallFrom, through: finishedThrough };
 }
 
@@ -411,7 +510,6 @@ export async function runCatalogueImport(options: {
     }
     if (result.truncated) {
       truncated = true;
-      break;
     }
   }
   if (!importedAny) {
@@ -428,7 +526,7 @@ export async function runCatalogueImport(options: {
   if (truncated) {
     options.log.warn(
       { from, through, applied, decoded, path: resolved },
-      'catalogue import stopped at truncated file; RPC backfill will continue from there',
+      'catalogue import left a hole at a truncated file; later packs continue, RPC fills the rest',
     );
     return { skipped: false, from, through, applied, decoded, failed };
   }

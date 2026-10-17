@@ -4,7 +4,7 @@ import { afterEach, describe, it } from 'node:test';
 import { closeDatabase, openDatabase, type SqliteDatabase } from '../../src/db/client.js';
 import { listDexTrades, listOhlcvCandles } from '../../src/db/queries/dex.js';
 import { getIndexerState, getLatestLedgerIndex, setIndexerState, upsertLedger } from '../../src/db/queries/indexer.js';
-import { HISTORY_DB_FROM, HISTORY_DB_STATUS, HISTORY_DB_THROUGH } from '../../src/ingester/historyDb.js';
+import { HISTORY_DB_FROM, HISTORY_DB_RANGES, HISTORY_DB_STATUS, HISTORY_DB_THROUGH } from '../../src/ingester/historyDb.js';
 import { getToken, getTrustLine, upsertTrustLine } from '../../src/db/queries/tokens.js';
 import { getUriToken, listUriTokenTransfers, upsertUriToken } from '../../src/db/queries/uritokens.js';
 import { createServer } from 'node:http';
@@ -493,6 +493,34 @@ describe('runBackfill', () => {
     });
     assert.equal(result.skipped, false);
     assert.deepEqual(requested, [12, 8]);
+    assert.equal(getIndexerState(db, 'backfill_status'), 'complete');
+    assert.equal(getIndexerState(db, 'backfill_next'), '7');
+  });
+
+  it('jumps disjoint history import islands and still fills the hole between them', async () => {
+    const db = memoryDb();
+    seedSnapshot(db, 12);
+    setIndexerState(db, HISTORY_DB_STATUS, 'running');
+    setIndexerState(db, HISTORY_DB_FROM, '8');
+    setIndexerState(db, HISTORY_DB_THROUGH, '12');
+    setIndexerState(db, HISTORY_DB_RANGES, JSON.stringify([
+      { from: 8, through: 9 },
+      { from: 11, through: 12 },
+    ]));
+    const requested: number[] = [];
+    const result = await runBackfill({
+      db,
+      config: testConfig({ backfillFromLedger: 8 }),
+      log: silentLog,
+      source: {
+        getLedgerWithTransactions: async (index) => {
+          requested.push(index);
+          return closedLedger(index, []);
+        },
+      },
+    });
+    assert.equal(result.skipped, false);
+    assert.deepEqual(requested, [10]);
     assert.equal(getIndexerState(db, 'backfill_status'), 'complete');
     assert.equal(getIndexerState(db, 'backfill_next'), '7');
   });

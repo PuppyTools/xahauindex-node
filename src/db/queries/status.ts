@@ -1,5 +1,6 @@
 import type { BackfillStatus, IndexerHealth, LedgerSpan, SnapshotStatus, Status } from '../../types/api.js';
-import { historyImportedRange } from '../../ingester/historyDb.js';
+import { historyImportedRanges } from '../../ingester/historyDb.js';
+import { ledgerGapsBetween as gapsBetween, mergeLedgerSpans as mergeSpans } from '../../util/ledgerSpans.js';
 import type { SqliteDatabase } from '../client.js';
 import {
   getIndexedLedgerCount,
@@ -36,35 +37,11 @@ function asBackfillStatus(value: string | undefined): BackfillStatus {
 }
 
 export function mergeLedgerSpans(spans: readonly LedgerSpan[]): LedgerSpan[] {
-  const valid = spans
-    .filter((span) => Number.isInteger(span.from) && Number.isInteger(span.through) && span.from >= 1 && span.through >= span.from)
-    .map((span) => ({ from: span.from, through: span.through }))
-    .sort((a, b) => a.from - b.from || a.through - b.through);
-  const merged: LedgerSpan[] = [];
-  for (const span of valid) {
-    const last = merged[merged.length - 1];
-    if (last !== undefined && span.from <= last.through + 1) {
-      last.through = Math.max(last.through, span.through);
-    } else {
-      merged.push(span);
-    }
-  }
-  return merged;
+  return mergeSpans(spans);
 }
 
 export function ledgerGapsBetween(spans: readonly LedgerSpan[]): LedgerSpan[] {
-  const gaps: LedgerSpan[] = [];
-  for (let index = 1; index < spans.length; index += 1) {
-    const prev = spans[index - 1];
-    const next = spans[index];
-    if (prev === undefined || next === undefined) {
-      continue;
-    }
-    if (next.from > prev.through + 1) {
-      gaps.push({ from: prev.through + 1, through: next.from - 1 });
-    }
-  }
-  return gaps;
+  return gapsBetween(spans);
 }
 
 function rpcHistorySpan(db: SqliteDatabase): LedgerSpan | null {
@@ -129,10 +106,7 @@ export function readLedgerCoverage(db: SqliteDatabase, ledgerIndex: number): {
   gaps: LedgerSpan[];
 } {
   const spans: LedgerSpan[] = [...currentCoverageSpans(db, ledgerIndex)];
-  const imported = historyImportedRange(db);
-  if (imported !== null) {
-    spans.push(imported);
-  }
+  spans.push(...historyImportedRanges(db));
   const rpc = rpcHistorySpan(db);
   if (rpc !== null) {
     spans.push(rpc);

@@ -7,6 +7,7 @@ import { resolveBackfillFrom, type Config } from '../config.js';
 import type { SqliteDatabase } from '../db/client.js';
 import { getIndexerState, setIndexerState } from '../db/queries/indexer.js';
 import { decodeHistoryTransactions, HISTORY_TX_TYPE_SQL } from './historyDecode.js';
+import { mergeLedgerSpans } from '../util/ledgerSpans.js';
 import { applyHistoricalLedger, snapshotLedgerBound } from './ledger.js';
 import type { LiveLogger } from './live.js';
 import type { ClosedLedger } from './source.js';
@@ -16,6 +17,7 @@ export const HISTORY_DB_FROM = 'history_db_from';
 export const HISTORY_DB_THROUGH = 'history_db_through';
 export const HISTORY_DB_NEXT = 'history_db_next';
 export const HISTORY_DB_LEDGER = 'history_db_ledger';
+export const HISTORY_DB_RANGES = 'history_db_ranges';
 
 export interface HistoryDbRange {
   from: number;
@@ -93,7 +95,7 @@ function dumpBounds(ledgerDb: Database.Database, txDb: Database.Database): Histo
   return { from, through };
 }
 
-export function historyImportedRange(db: SqliteDatabase): HistoryDbRange | null {
+function envelopeRange(db: SqliteDatabase): HistoryDbRange | null {
   const status = getIndexerState(db, HISTORY_DB_STATUS);
   const from = parseStateInt(db, HISTORY_DB_FROM);
   const through = parseStateInt(db, HISTORY_DB_THROUGH);
@@ -110,6 +112,65 @@ export function historyImportedRange(db: SqliteDatabase): HistoryDbRange | null 
     }
   }
   return null;
+}
+
+function readStoredRanges(db: SqliteDatabase): HistoryDbRange[] {
+  const raw = getIndexerState(db, HISTORY_DB_RANGES);
+  if (raw === undefined || raw === '') {
+    return [];
+  }
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    if (!Array.isArray(parsed)) {
+      return [];
+    }
+    const spans: HistoryDbRange[] = [];
+    for (const entry of parsed) {
+      if (
+        entry !== null &&
+        typeof entry === 'object' &&
+        Number.isInteger((entry as HistoryDbRange).from) &&
+        Number.isInteger((entry as HistoryDbRange).through)
+      ) {
+        spans.push({ from: (entry as HistoryDbRange).from, through: (entry as HistoryDbRange).through });
+      }
+    }
+    return mergeLedgerSpans(spans);
+  } catch {
+    return [];
+  }
+}
+
+/** Contiguous islands imported from CATL / history SQLite. May be disjoint after a truncated pack. */
+export function historyImportedRanges(db: SqliteDatabase): HistoryDbRange[] {
+  const stored = readStoredRanges(db);
+  if (stored.length > 0) {
+    return stored;
+  }
+  const fallback = envelopeRange(db);
+  return fallback === null ? [] : [fallback];
+}
+
+export function historyImportedRange(db: SqliteDatabase): HistoryDbRange | null {
+  const ranges = historyImportedRanges(db);
+  if (ranges.length === 0) {
+    return null;
+  }
+  if (ranges.length === 1) {
+    return ranges[0] ?? null;
+  }
+  const first = ranges[0];
+  const last = ranges[ranges.length - 1];
+  if (first === undefined || last === undefined) {
+    return null;
+  }
+  return { from: first.from, through: last.through };
+}
+
+export function addHistoryImportedRange(db: SqliteDatabase, span: HistoryDbRange): HistoryDbRange[] {
+  const merged = mergeLedgerSpans([...historyImportedRanges(db), span]);
+  setIndexerState(db, HISTORY_DB_RANGES, JSON.stringify(merged));
+  return merged;
 }
 
 export function historyImportTargetRange(

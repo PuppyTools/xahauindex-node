@@ -158,6 +158,45 @@ describe('GET /v1/status', () => {
     await app.close();
   });
 
+  it('keeps a hole between disjoint catalogue islands', async () => {
+    const db = openDatabase(':memory:');
+    dbs.push(db);
+    setIndexerState(db, 'snapshot_status', 'complete');
+    setIndexerState(db, 'snapshot_ledger', '100');
+    setIndexerState(db, 'live_from_ledger', '101');
+    setIndexerState(db, 'history_db_status', 'running');
+    setIndexerState(db, 'history_db_from', '1');
+    setIndexerState(db, 'history_db_through', '80');
+    setIndexerState(db, 'history_db_ledger', '80');
+    setIndexerState(
+      db,
+      'history_db_ranges',
+      JSON.stringify([
+        { from: 1, through: 50 },
+        { from: 70, through: 80 },
+      ]),
+    );
+    db.prepare(
+      'INSERT INTO ledgers (ledger_index, close_time, hash, tx_count, indexed_at) VALUES (?, ?, ?, ?, ?)',
+    ).run(105, 1_700_000_000, 'A'.repeat(64), 0, 1_700_000_001);
+    const app = await buildApi({
+      db,
+      config: testConfig(),
+      runtime: testRuntime({ networkLedgerIndex: 105 }),
+    });
+    const body = (await app.inject({ method: 'GET', url: '/v1/status' })).json() as { data: Status };
+    assert.deepEqual(body.data.ledger_ranges, [
+      { from: 1, through: 50 },
+      { from: 70, through: 80 },
+      { from: 100, through: 105 },
+    ]);
+    assert.deepEqual(body.data.ledger_gaps, [
+      { from: 51, through: 69 },
+      { from: 81, through: 99 },
+    ]);
+    await app.close();
+  });
+
   it('splits the live island around an open subscribe gap', async () => {
     const db = openDatabase(':memory:');
     dbs.push(db);
